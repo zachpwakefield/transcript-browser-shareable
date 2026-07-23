@@ -1,12 +1,16 @@
-# Bundled SpliceImpactR source
+# SpliceImpactR preparation dependency
 
-This directory contains the SpliceImpactR 0.99.4 source used by the browser's data-preparation adapter. The package retains its upstream GPL-3 license metadata, authorship, and citation information. See `SpliceImpactR/README.md` and `SpliceImpactR/DESCRIPTION` for upstream details.
-
-Install it from the repository root with:
+The browser does not vendor SpliceImpactR. Install the Bioconductor package in
+the R environment used for one-time data preparation:
 
 ```bash
-R CMD INSTALL spliceimpactr/SpliceImpactR
+./scripts/install_spliceimpactr.sh
 ```
+
+This uses `BiocManager::install("SpliceImpactR")` and retains the upstream
+GPL-3 attribution through [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md).
+The installed package version and Bioconductor release are recorded in the
+generated preparation manifest.
 
 Then, from the repository root, run:
 

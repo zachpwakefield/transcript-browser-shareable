@@ -49,9 +49,21 @@ if (!requireNamespace("SpliceImpactR", quietly = TRUE)) {
   stop(
     paste(
       "SpliceImpactR is not installed.",
-      "Install the bundled source first with:",
-      "R CMD INSTALL spliceimpactr/SpliceImpactR"
+      "Install the Bioconductor package first with:",
+      "./scripts/install_spliceimpactr.sh"
     ),
+    call. = FALSE
+  )
+}
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  stop(
+    "BiocManager is required to identify the Bioconductor release used for SpliceImpactR.",
+    call. = FALSE
+  )
+}
+if (!requireNamespace("BiocFileCache", quietly = TRUE)) {
+  stop(
+    "BiocFileCache is required to resolve SpliceImpactR's downloaded GENCODE assets.",
     call. = FALSE
   )
 }
@@ -98,27 +110,63 @@ if (any(is.na(explicit_raw)) && any(!is.na(explicit_raw))) {
   stop("Provide all three of --gtf, --transcript-fa, and --protein-fa, or none.", call. = FALSE)
 }
 
+annotation <- NULL
+
+resolve_cached_asset <- function(filename, base_dir) {
+  bfc_dir <- file.path(base_dir, "BiocFileCache")
+  if (!dir.exists(bfc_dir)) {
+    stop(
+      "SpliceImpactR did not create its BiocFileCache directory: ", bfc_dir,
+      call. = FALSE
+    )
+  }
+  bfc <- BiocFileCache::BiocFileCache(cache = bfc_dir, ask = FALSE)
+  hits <- BiocFileCache::bfcquery(
+    bfc,
+    query = filename,
+    field = "rname",
+    exact = FALSE
+  )
+  if (!nrow(hits)) {
+    stop(
+      "Could not locate downloaded GENCODE asset in BiocFileCache: ", filename,
+      ". Pass --gtf, --transcript-fa, and --protein-fa explicitly.",
+      call. = FALSE
+    )
+  }
+  paths <- unique(unname(BiocFileCache::bfcpath(bfc, hits$rid)))
+  paths <- paths[file.exists(paths)]
+  if (length(paths) != 1L) {
+    stop(
+      "Expected one cached GENCODE asset for ", filename,
+      "; found ", length(paths), ". Pass the raw paths explicitly.",
+      call. = FALSE
+    )
+  }
+  normalizePath(paths[[1L]], winslash = "/", mustWork = TRUE)
+}
+
 if (all(!is.na(explicit_raw))) {
   raw_paths <- setNames(
     vapply(explicit_raw, function(path) normalizePath(path, winslash = "/", mustWork = TRUE), character(1)),
     names(explicit_raw)
   )
 } else {
-  message("[1/3] Obtaining GENCODE v45 assets through SpliceImpactR's cache")
-  # This helper is intentionally the only internal-package call.  The public
-  # get_annotation()/get_protein_features() APIs do the actual parsing and
-  # annotation work; the helper exposes the cached raw files so the Python
-  # builder can consume the same authoritative inputs.
-  assets <- SpliceImpactR:::.si_prepare_assets(
+  message("[1/3] Obtaining GENCODE v45 assets through SpliceImpactR")
+  # Use only public SpliceImpactR and BiocFileCache APIs.  The browser adapter
+  # never reaches into SpliceImpactR's private functions; this keeps the
+  # preparation workflow compatible with the Bioconductor release package.
+  annotation <- SpliceImpactR::get_annotation(
+    load = "link",
     base_dir = base_dir,
     species = "human",
     release = gencode_release,
-    mode = "download"
+    filter_tsl = filter_tsl
   )
   raw_paths <- c(
-    gtf = assets$paths$gtf_gz,
-    transcript = assets$paths$txfa_gz,
-    translation = assets$paths$aafa_gz
+    gtf = resolve_cached_asset(raw_names[["gtf"]], base_dir),
+    transcript = resolve_cached_asset(raw_names[["transcript"]], base_dir),
+    translation = resolve_cached_asset(raw_names[["translation"]], base_dir)
   )
 }
 
@@ -131,17 +179,21 @@ for (key in names(raw_paths)) {
   }
 }
 
-message("[2/3] Processing GENCODE annotation with SpliceImpactR")
-annotation <- SpliceImpactR::get_annotation(
-  load = "path",
-  base_dir = base_dir,
-  species = "human",
-  release = gencode_release,
-  gtf_path = file.path(output_dir, raw_names[["gtf"]]),
-  transcript_path = file.path(output_dir, raw_names[["transcript"]]),
-  translation_path = file.path(output_dir, raw_names[["translation"]]),
-  filter_tsl = filter_tsl
-)
+if (is.null(annotation)) {
+  message("[2/3] Processing GENCODE annotation with SpliceImpactR")
+  annotation <- SpliceImpactR::get_annotation(
+    load = "path",
+    base_dir = base_dir,
+    species = "human",
+    release = gencode_release,
+    gtf_path = file.path(output_dir, raw_names[["gtf"]]),
+    transcript_path = file.path(output_dir, raw_names[["transcript"]]),
+    translation_path = file.path(output_dir, raw_names[["translation"]]),
+    filter_tsl = filter_tsl
+  )
+} else {
+  message("[2/3] Using the annotation returned by SpliceImpactR")
+}
 
 required_columns <- c(
   "ensembl_transcript_id", "start", "stop", "chr", "strand",
@@ -225,6 +277,7 @@ manifest <- list(
   producer = list(
     package = "SpliceImpactR",
     version = as.character(utils::packageVersion("SpliceImpactR")),
+    bioconductor_version = as.character(BiocManager::version()),
     package_license = "GPL-3"
   ),
   browser_contract = list(

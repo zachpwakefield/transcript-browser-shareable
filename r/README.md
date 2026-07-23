@@ -1,10 +1,21 @@
 # Annotation-build R environment
 
-R is used only to read and normalize the seven local feature RDS files. It is
-not required by the browser at runtime.
+R is used only during data preparation and to read/normalize the seven local
+feature RDS files. It is not required by the browser at runtime.
 
-The supported build environment is R 4.5.2 with the exact package versions in
-both `renv.lock` and `dependencies.lock.tsv`:
+SpliceImpactR is installed from Bioconductor with:
+
+```bash
+./scripts/install_spliceimpactr.sh
+```
+
+The current Bioconductor release lists SpliceImpactR for R 4.6. Bioconductor
+selects the compatible package repository for the R version in use. The
+adapter records the installed SpliceImpactR and Bioconductor versions in its
+relative-path preparation manifest.
+
+The small standalone R export/preflight helper remains pinned to R 4.5.2 with
+the exact package versions in both `renv.lock` and `dependencies.lock.tsv`:
 
 - data.table 1.18.2.1
 - jsonlite 2.0.0

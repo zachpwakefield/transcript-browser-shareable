@@ -2,11 +2,12 @@
 
 An offline-first genome/transcript browser for GENCODE v45 transcript structure and exon-aware protein features. It is designed for fast local inspection of genes and isoforms without depending on a hosted Ensembl session.
 
-This repository contains the browser source, deterministic SQLite builder, tests, documentation, and a vendored copy of SpliceImpactR 0.99.4. It does **not** contain scientific data products: the GTF, FASTA files, RDS feature tables, SQLite database, reference index, virtual environments, frontend dependencies, desktop bundles, local notes, logs, credentials, or machine-specific receipts are generated or supplied locally.
+This repository contains the browser source, deterministic SQLite builder, tests, documentation, and the adapter that prepares inputs with the Bioconductor SpliceImpactR package. It does **not** contain scientific data products or third-party package source: the GTF, FASTA files, RDS feature tables, SQLite database, reference index, virtual environments, frontend dependencies, desktop bundles, local notes, logs, credentials, or machine-specific receipts are generated or supplied locally.
 
 ## Contents
 
 - [What it does](#what-it-does)
+- [Example screenshots](#example-screenshots)
 - [Quick start](#quick-start)
 - [How SpliceImpactR feeds the browser](#how-spliceimpactr-feeds-the-browser)
 - [Data contract](#data-contract)
@@ -35,6 +36,28 @@ The browser combines a genome-browser-style locus view with transcript and prote
 
 The interface intentionally follows the useful genome-browser ideas users expect from Ensembl, IGV, and UCSC, but uses one shared local layout model for accessible controls, Canvas rendering, hit testing, scrolling, and protein-row geometry. This avoids the synchronization problems that can arise when several independent renderers own the same transcript rows.
 
+## Example screenshots
+
+These examples are captured from the small SP1 acceptance fixture used during development. They demonstrate the interface and interaction model only; the fixture is not a substitute for a prepared GENCODE v45 build and is not included as scientific data in this source-only repository.
+
+### Expanded protein-feature track
+
+Expanding a transcript adds exon-confined genomic feature segments and an independent continuous N-to-C protein axis. Source badges and the inspector stay synchronized with the visible row.
+
+![SP1-201 expanded with exon-aware protein feature projections and a transcript inspector](docs/assets/sp1-expanded-protein-features.jpg)
+
+### Transcript comparison
+
+The comparison inspector makes isoform differences explicit, including transcript/CDS/protein lengths, annotation flags, and per-source feature counts. “Different” is written in the table rather than communicated by color alone.
+
+![SP1-201 versus SP1-202 transcript comparison inspector](docs/assets/sp1-transcript-comparison.jpg)
+
+### Protein sequence inspection
+
+The sequence inspector provides the versioned protein identifier, copy/export affordances, exon overlays, and a readable amino-acid sequence that mirrors the selected transcript.
+
+![SP1-201 protein sequence inspector with exon overlays](docs/assets/sp1-sequence-inspector.jpg)
+
 ## Quick start
 
 The following commands create a complete local build. Run them from a fresh clone; the paths are examples, not required locations.
@@ -43,7 +66,7 @@ The following commands create a complete local build. Run them from a fresh clon
 
 - Python 3.9+ for the API and builder (the lock file is tested across the supported Python range).
 - Node.js 22.13+ and pnpm 11.7+ for the production frontend.
-- R with the SpliceImpactR imports declared in [`spliceimpactr/SpliceImpactR/DESCRIPTION`](spliceimpactr/SpliceImpactR/DESCRIPTION); Bioconductor dependencies are needed only during data preparation.
+- R and Bioconductor for the [SpliceImpactR package](https://bioconductor.org/packages/release/bioc/html/SpliceImpactR.html); the current Bioconductor release is designed for R 4.6, and the package is needed only during data preparation.
 - `samtools` for the reference FASTA index.
 - Network access during preparation only. Runtime browsing is local/offline.
 
@@ -61,7 +84,7 @@ pnpm install --frozen-lockfile
 pnpm run build
 cd ..
 
-# Install the bundled SpliceImpactR package into the active R library.
+# Install SpliceImpactR from Bioconductor into the active R library.
 ./scripts/install_spliceimpactr.sh
 
 # Download/process GENCODE v45 and obtain the seven protein-feature sources.
@@ -95,7 +118,7 @@ The preparation step is the only normal step that contacts GENCODE, Ensembl BioM
 The data flow is deliberately explicit:
 
 ```text
-SpliceImpactR 0.99.4
+SpliceImpactR (Bioconductor release)
   ├─ GENCODE v45 GTF + transcript FASTA + protein FASTA
   ├─ Ensembl 111 BioMart features
   └─ ELM linear motifs
@@ -113,7 +136,7 @@ validated immutable data/builds/gencode_v45/annotation.sqlite
 loopback API + React/Canvas browser
 ```
 
-`scripts/prepare_spliceimpactr_cache.R` calls SpliceImpactR's public `get_annotation()` and `get_protein_features()` APIs. It writes one normalized RDS table per source, derives an optional `exon_features.rds` audit table with `get_exon_features()`, and writes a relative-path-only `spliceimpactr_manifest.json`. A small internal SpliceImpactR helper is used only to locate cached raw GENCODE files so the browser's independent builder can consume the exact same bytes.
+`scripts/prepare_spliceimpactr_cache.R` calls SpliceImpactR's public `get_annotation()` and `get_protein_features()` APIs and uses BiocFileCache's public path lookup to locate downloaded raw assets. It writes one normalized RDS table per source, derives an optional `exon_features.rds` audit table with `get_exon_features()`, and writes a relative-path-only `spliceimpactr_manifest.json` containing the installed package and Bioconductor versions. The adapter does not call SpliceImpactR private functions.
 
 ### Release pairing
 
@@ -127,7 +150,7 @@ Do not mix releases casually. If a new annotation release is desired, treat it a
 
 ### Preparation commands
 
-Install the bundled package:
+Install SpliceImpactR from Bioconductor:
 
 ```bash
 ./scripts/install_spliceimpactr.sh
@@ -246,6 +269,9 @@ The main API surface is intentionally small and read-only: `GET /api/v1/health`,
 
 The operational limits and remaining cross-browser/scientific review gates are documented in [`docs/limitations.md`](docs/limitations.md) and [`docs/release_checklist.md`](docs/release_checklist.md).
 
+The complete product and engineering blueprint is retained as design
+provenance in [`docs/LOCAL_TRANSCRIPT_BROWSER_IMPLEMENTATION_PLAN.md`](docs/LOCAL_TRANSCRIPT_BROWSER_IMPLEMENTATION_PLAN.md).
+
 ## Verification and publication
 
 Run the source/privacy audit before every commit:
@@ -287,15 +313,16 @@ frontend/src/                React controls, Canvas genome view, inspectors
 frontend/tests/              frontend behavior and interaction contracts
 r/                           locked R preflight/export helpers
 scripts/                     data preparation, build, audit, benchmark helpers
-spliceimpactr/SpliceImpactR/ vendored SpliceImpactR 0.99.4 source
+spliceimpactr/README.md       Bioconductor dependency notes
 docs/                        data, architecture, coordinate, review, and release docs
+docs/assets/                 static README screenshots from the SP1 UI acceptance fixture
 desktop_app/                 optional macOS launcher and installer
 data/builds/                 generated local builds only; ignored by Git
 ```
 
 ## Troubleshooting
 
-- **SpliceImpactR will not install:** use the R/Bioconductor versions required by its `DESCRIPTION` and restore the package dependencies before running the adapter. The browser does not need SpliceImpactR at runtime.
+- **SpliceImpactR will not install:** use the R/Bioconductor release listed on its [Bioconductor package page](https://bioconductor.org/packages/release/bioc/html/SpliceImpactR.html), then rerun `./scripts/install_spliceimpactr.sh`. The browser does not need SpliceImpactR at runtime.
 - **The adapter says a source is missing:** provide all three raw GENCODE paths together, or remove a partially prepared output and rerun without `--skip-exon`.
 - **A feature checksum or count fails:** keep the GENCODE/Ensembl pairing and `--filter-tsl` setting consistent. Do not edit the builder manifest by hand.
 - **Reference verification fails:** follow [`docs/reference_setup.md`](docs/reference_setup.md) and regenerate the `.fai` with the same FASTA bytes.
@@ -306,6 +333,6 @@ data/builds/                 generated local builds only; ignored by Git
 
 ## Licensing and attribution
 
-SpliceImpactR is included at version 0.99.4 with its upstream GPL-3 metadata, authorship, citation, and source notices intact. The browser source still needs an explicit license selected by the repository owner before public redistribution; until then, GitHub download does not grant a new license to the browser code. Third-party notices are collected in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+SpliceImpactR is installed from Bioconductor during data preparation and remains under its upstream GPL-3 license, authorship, citation, and source notices. The browser source still needs an explicit license selected by the repository owner before public redistribution; until then, GitHub download does not grant a new license to the browser code. Third-party notices are collected in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 Reference and annotation files remain subject to their respective GENCODE, Ensembl, BioMart, ELM, and database terms. Review those terms before redistributing generated data. For the critical review and release boundary, see [`docs/release_checklist.md`](docs/release_checklist.md).

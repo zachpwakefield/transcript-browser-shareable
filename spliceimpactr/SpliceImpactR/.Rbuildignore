@@ -1,6 +1,0 @@
-^.*\.Rproj$
-^\.Rproj\.user$
-inst/*.png
-^LICENSE\.md$
-^doc$
-^Meta$

@@ -46,7 +46,7 @@ def main() -> int:
             elif relative.startswith("data/") or relative.startswith(("output/", "tmp/", "desktop_app/dist/")):
                 failures.append(f"generated/local artifact: {relative}")
                 continue
-        if not relative.startswith("spliceimpactr/") and relative.endswith(GENERATED_SUFFIXES):
+        if relative.endswith(GENERATED_SUFFIXES):
             failures.append(f"generated scientific input: {relative}")
             continue
         if path.stat().st_size > 50 * 1024 * 1024:

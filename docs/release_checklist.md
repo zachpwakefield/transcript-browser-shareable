@@ -7,11 +7,11 @@ This checklist is intentionally a template for a fresh checkout. It does not cla
 - [ ] `scripts/verify_publication.sh` passes.
 - [ ] No `data/cache`, `data/reference`, `data/spliceimpactr-cache`, `data/builds`, `output`, virtual environment, or frontend dependency directory is staged.
 - [ ] The browser source has a repository-owner-selected license.
-- [ ] SpliceImpactR's GPL-3 metadata and attribution remain intact.
+- [ ] SpliceImpactR's Bioconductor GPL-3 attribution and package citation are documented; no vendored package source is staged.
 
 ## Build gate
 
-- [ ] SpliceImpactR 0.99.4 installs in the documented R environment.
+- [ ] SpliceImpactR installs from Bioconductor in the documented R/Bioconductor environment and its installed version is recorded in the preparation manifest.
 - [ ] The GENCODE v45 cache manifest contains all seven feature sources and the required columns.
 - [ ] The Ensembl release-115 reference FASTA and `.fai` match the pinned digests.
 - [ ] `scripts/build_annotations.sh` publishes a full build and `scripts/verify_release.sh` passes.

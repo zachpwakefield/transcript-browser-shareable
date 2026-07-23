@@ -4,12 +4,13 @@ The shareable browser keeps scientific inputs out of the repository. `scripts/pr
 
 ## Pinned sources
 
+- SpliceImpactR from Bioconductor (the current release is 1.0.0 in Bioconductor 3.23/R 4.6; the generated manifest records the installed version).
 - GENCODE human release 45 (GTF, protein-coding transcript FASTA, and translated-protein FASTA).
 - Ensembl release 111 for BioMart protein-feature queries, the release paired with GENCODE v45.
 - ELM for linear motifs, retrieved by SpliceImpactR.
 - Ensembl release 115 GRCh38.p14 top-level reference FASTA for byte-range serving. The builder checks the reference SHA-256 and `.fai` index against the values in `backend/builder/constants.py`.
 
-The first three inputs are obtained through SpliceImpactR's BiocFileCache-backed annotation and feature functions. The script uses the package's public `get_annotation()` and `get_protein_features()` APIs. Its one internal helper call only locates the already-downloaded raw GENCODE files so that the browser's independent streaming builder can consume the same bytes. If a future SpliceImpactR version changes that helper, pass all three raw files explicitly with `--gtf`, `--transcript-fa`, and `--protein-fa`.
+The first three inputs are obtained through SpliceImpactR's BiocFileCache-backed annotation and feature functions. The script uses the package's public `get_annotation()` and `get_protein_features()` APIs, plus BiocFileCache's public path lookup to copy the raw GENCODE files into the browser cache. It does not call SpliceImpactR private functions. If a future Bioconductor release changes its cache layout, pass all three raw files explicitly with `--gtf`, `--transcript-fa`, and `--protein-fa`.
 
 The seven source tables map to browser lanes as follows:
 
@@ -27,7 +28,7 @@ The browser keeps source identity and retrieval method visible. It does not turn
 
 ## Install and run
 
-Use the R version and dependencies required by the package. On a machine with Bioconductor configured:
+Use the R/Bioconductor release required by the package. The current Bioconductor release lists SpliceImpactR for R 4.6. On a machine with R installed:
 
 ```bash
 ./scripts/install_spliceimpactr.sh
@@ -36,7 +37,7 @@ Rscript scripts/prepare_spliceimpactr_cache.R \
   --base-dir data/spliceimpactr-cache
 ```
 
-`R CMD INSTALL` installs the bundled package but does not invent missing R/Bioconductor dependencies. Install the imports declared in `spliceimpactr/SpliceImpactR/DESCRIPTION` with the R/Bioconductor workflow appropriate for your environment, then rerun the installer if it reports a missing package. The browser runtime itself requires only the generated SQLite build and Python/frontend dependencies.
+The installer delegates to `BiocManager::install("SpliceImpactR")`, which selects the Bioconductor repository compatible with the installed R release and installs declared imports. The browser runtime itself requires only the generated SQLite build and Python/frontend dependencies.
 
 The default `--filter-tsl 1,2,3` matches the browser's audited feature cache. Use `--filter-tsl 1,2,3,4,5` only when intentionally rebuilding and re-auditing the expected feature counts. `--force` refreshes the BiocFileCache and rewrites existing RDS outputs.
 

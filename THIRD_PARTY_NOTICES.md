@@ -37,13 +37,13 @@ Versions below are the installed, locked dependencies used to build and run this
 | data.table | 1.18.2.1 | MPL-2.0 |
 | jsonlite | 2.0.0 | MIT |
 
-The browser's small R build preflight/export layer uses only the pinned `data.table` and `jsonlite` versions above; its supported R release and dependency records are in `r/renv.lock`. Data preparation additionally uses the imports declared by the bundled SpliceImpactR package below.
+The browser's small R build preflight/export layer uses only the pinned `data.table` and `jsonlite` versions above; its supported R release and dependency records are in `r/renv.lock`. Data preparation additionally installs SpliceImpactR and its declared imports from Bioconductor through `BiocManager`.
 
-## SpliceImpactR source
+## SpliceImpactR Bioconductor dependency
 
-- SpliceImpactR 0.99.4 is bundled under `spliceimpactr/SpliceImpactR` for reproducible data preparation.
-- The package declares `GPL-3` in `DESCRIPTION`; that license, authorship, citation, and upstream notices remain intact.
-- Upstream project: [fiszbein-lab/SpliceImpactR](https://github.com/fiszbein-lab/SpliceImpactR).
+- SpliceImpactR is installed from the [Bioconductor package page](https://bioconductor.org/packages/release/bioc/html/SpliceImpactR.html) for data preparation; the browser repository does not redistribute its source.
+- The package is licensed `GPL-3`; users should retain its authorship, citation, and upstream notices in the installed R library.
+- Upstream project: [Bioconductor SpliceImpactR](https://bioconductor.org/packages/release/bioc/html/SpliceImpactR.html) and [fiszbein-lab/SpliceImpactR](https://github.com/fiszbein-lab/SpliceImpactR).
 - The browser does not import SpliceImpactR at runtime. It consumes the normalized GENCODE/protein-feature tables produced by `scripts/prepare_spliceimpactr_cache.R`.
 
 ## Renderer decision
