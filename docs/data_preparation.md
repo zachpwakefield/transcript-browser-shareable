@@ -8,7 +8,7 @@ The shareable browser keeps scientific inputs out of the repository. `scripts/pr
 - GENCODE human release 45 (GTF, protein-coding transcript FASTA, and translated-protein FASTA).
 - Ensembl release 111 for BioMart protein-feature queries, the release paired with GENCODE v45.
 - ELM for linear motifs, retrieved by SpliceImpactR.
-- Ensembl release 115 GRCh38.p14 top-level reference FASTA for byte-range serving. The builder checks the reference SHA-256 and `.fai` index against the values in `backend/builder/constants.py`.
+- Optional Ensembl release 115 GRCh38.p14 top-level reference FASTA for byte-range serving. The builder checks the reference SHA-256 and `.fai` index against the values in `backend/builder/constants.py` when this input is supplied.
 
 The first three inputs are obtained through SpliceImpactR's BiocFileCache-backed annotation and feature functions. The script uses the package's public `get_annotation()` and `get_protein_features()` APIs, plus BiocFileCache's public path lookup to copy the raw GENCODE files into the browser cache. It does not call SpliceImpactR private functions. If a future Bioconductor release changes its cache layout, pass all three raw files explicitly with `--gtf`, `--transcript-fa`, and `--protein-fa`.
 
@@ -56,9 +56,9 @@ Rscript scripts/prepare_spliceimpactr_cache.R \
 
 The script also derives `exon_features.rds` with `SpliceImpactR::get_exon_features()` for an exon-level audit/provenance view. The browser builder does not trust that derived table as its source of geometry; it recomputes its own projections from the raw GTF and seven feature tables. The generated `spliceimpactr_manifest.json` contains only relative filenames, release identifiers, package version, and feature counts. It deliberately omits usernames, absolute paths, host details, timestamps, and cache internals.
 
-## Reference FASTA
+## Optional reference FASTA
 
-Download the Ensembl release-115 GRCh38.p14 `Homo_sapiens.GRCh38.dna.toplevel.fa`, decompress it, and build the adjacent index:
+Transcript, transcript-sequence, and protein-feature browsing does not require a whole-genome reference. To enable optional byte-range reference serving, download the Ensembl release-115 GRCh38.p14 `Homo_sapiens.GRCh38.dna.toplevel.fa`, decompress it, and build the adjacent index:
 
 ```bash
 mkdir -p data/reference
@@ -67,11 +67,14 @@ samtools faidx data/reference/Homo_sapiens.GRCh38.dna.toplevel.fa
 shasum -a 256 data/reference/Homo_sapiens.GRCh38.dna.toplevel.fa
 ```
 
-The SHA-256 must match `REFERENCE_FASTA_SHA256` and the index digest must match `REFERENCE_FAI_SHA256` in the constants module. The builder refuses a different assembly or index instead of producing a misleading browser.
+When supplied, the SHA-256 must match `REFERENCE_FASTA_SHA256` and the index digest must match `REFERENCE_FAI_SHA256` in the constants module. The builder refuses a different assembly or index instead of producing a misleading reference endpoint. If no reference is supplied, omit `--reference-fasta`; the full annotation package remains valid and starts without reference-range capability.
 
 ## Build and verify
 
 ```bash
+./scripts/build_annotations.sh data/cache --scope full
+
+# Optional reference-enabled build:
 ./scripts/build_annotations.sh data/cache \
   --reference-fasta data/reference/Homo_sapiens.GRCh38.dna.toplevel.fa \
   --scope full

@@ -13,7 +13,7 @@ This checklist is intentionally a template for a fresh checkout. It does not cla
 
 - [ ] SpliceImpactR installs from Bioconductor in the documented R/Bioconductor environment and its installed version is recorded in the preparation manifest.
 - [ ] The GENCODE v45 cache manifest contains all seven feature sources and the required columns.
-- [ ] The Ensembl release-115 reference FASTA and `.fai` match the pinned digests.
+- [ ] If the optional reference capability is included, the Ensembl release-115 FASTA and `.fai` match the pinned digests; otherwise the manifest explicitly records `reference.available=false`.
 - [ ] `scripts/build_annotations.sh` publishes a full build and `scripts/verify_release.sh` passes.
 - [ ] Backend and frontend tests pass from a clean environment.
 

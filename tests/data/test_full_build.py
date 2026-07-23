@@ -132,9 +132,14 @@ class FullBuildAcceptanceTests(unittest.TestCase):
         self.assertEqual(self.connection.execute("PRAGMA foreign_key_check").fetchall(), [])
         self.assertEqual(canonical_table_hashes(self.connection), self.manifest["content_hashes"])
 
-    def test_reference_is_linked_not_copied(self) -> None:
-        fasta = BUILD_DIR / self.manifest["reference"]["fasta_public_path"]
-        index = BUILD_DIR / self.manifest["reference"]["fai_public_path"]
+    def test_reference_is_optional_and_linked_when_present(self) -> None:
+        reference = self.manifest["reference"]
+        if not reference["available"]:
+            self.assertFalse((BUILD_DIR / "reference").exists())
+            self.assertFalse(self.manifest["capabilities"]["reference_ranges"])
+            return
+        fasta = BUILD_DIR / reference["fasta_public_path"]
+        index = BUILD_DIR / reference["fai_public_path"]
         self.assertTrue(fasta.is_symlink())
         self.assertTrue(index.is_symlink())
         self.assertLess(sum(path.lstat().st_size for path in BUILD_DIR.rglob("*")), 3_000_000_000)

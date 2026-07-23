@@ -71,21 +71,24 @@ class SP1BuildAcceptanceTests(unittest.TestCase):
         ).fetchone()[0]
         self.assertEqual(invalid, 0)
 
-    def test_manifest_is_self_consistent_and_reference_verified(self) -> None:
+    def test_manifest_is_self_consistent_and_reference_is_optional(self) -> None:
         manifest = json.loads((BUILD_DIR / "manifest.json").read_text())
         report = json.loads((BUILD_DIR / "validation_report.json").read_text())
         self.assertEqual(manifest["build_hash"], report["build_hash"])
         self.assertTrue(manifest["technical_preview"])
-        self.assertTrue(manifest["reference"]["available"])
-        self.assertTrue(manifest["reference"]["verified"])
-        self.assertEqual(manifest["reference"]["directory"], "reference")
-        self.assertEqual(manifest["reference"]["manifest"], "reference_manifest.json")
-        self.assertTrue((BUILD_DIR / "reference" / "verification_receipt.json").exists())
-        receipt = json.loads(
-            (BUILD_DIR / "reference" / "verification_receipt.json").read_text()
-        )
-        self.assertIn("files", receipt)
-        self.assertNotIn("records", receipt)
+        if manifest["reference"]["available"]:
+            self.assertTrue(manifest["reference"]["verified"])
+            self.assertEqual(manifest["reference"]["directory"], "reference")
+            self.assertEqual(manifest["reference"]["manifest"], "reference_manifest.json")
+            self.assertTrue((BUILD_DIR / "reference" / "verification_receipt.json").exists())
+            receipt = json.loads(
+                (BUILD_DIR / "reference" / "verification_receipt.json").read_text()
+            )
+            self.assertIn("files", receipt)
+            self.assertNotIn("records", receipt)
+        else:
+            self.assertFalse((BUILD_DIR / "reference").exists())
+            self.assertFalse(manifest["capabilities"]["reference_ranges"])
 
     def test_repeat_build_has_identical_manifest_and_no_backup(self) -> None:
         configured_cache = os.environ.get("TRANSCRIPT_BROWSER_TEST_CACHE")

@@ -3,19 +3,19 @@
 The application is split into three deliberately replaceable layers.
 
 1. The schema-1.1 annotation builder streams authoritative GENCODE v45 GTF and FASTA records, normalizes the seven local protein-feature tables, projects amino-acid intervals through transcript-ordered CDS segments, materializes exact/prefix search plus four complete density pyramids, validates the result, and atomically publishes an immutable SQLite package.
-2. The FastAPI service opens that package read-only, exposes bounded versioned JSON endpoints plus a bounded `POST /api/v1/report/pdf` generator, serves the indexed reference with HTTP byte ranges, and serves the built single-page application. Region queries over-fetch one viewport for smooth panning but preserve requested-interval flags, pagination, semantic detail, and export boundaries.
+2. The FastAPI service opens that package read-only, exposes bounded versioned JSON endpoints plus a bounded `POST /api/v1/report/pdf` generator, serves an optional indexed reference with HTTP byte ranges when one is supplied, and serves the built single-page application. Region queries over-fetch one viewport for smooth panning but preserve requested-interval flags, pagination, semantic detail, and export boundaries.
 3. The React workspace owns URL state and explicit user-directed vertical scrolling. A gene-scoped visual-order layer is applied to immutable transcript summaries before filtering and layout. A shared row-layout model then drives the sticky DOM label rail, Canvas2D track, and dense-gene minimap, including hit bounds and complete logical height. A viewport window selects the DOM rows and Canvas slice to mount/draw, while the outer scroller preserves the complete layout. Up to 25 translated transcripts can remain additively expanded. Expanded height is reserved from the active feature-source selection before asynchronous records arrive, so completion fills stable geometry rather than moving the viewport. Transcript detail demand follows the window plus explicit selected, comparison, pinned, bounded-expanded, and selected-neighbor context. Feature-table and sequence rows are separately virtualized, and stale search, region, detail, feature, sequence, and PDF-report work is aborted. Pure helper layers validate submitted-search resolution, the build-scoped local workspace, current-gene navigation, comparison metrics/export, shortcut gating, PDF presets, diagnostics, and minimap geometry. The renderer is the custom-Canvas fallback explicitly allowed by the implementation plan, so no remote genome registry or igv.js runtime is present.
 
 Runtime data flow:
 
 ```text
-raw GTF + transcript/protein FASTA + feature RDS + verified reference
+raw GTF + transcript/protein FASTA + feature RDS + optional reference
                               |
                               v
                  deterministic annotation build
                               |
                               v
- SQLite + manifest + validation report + density/search indexes + reference
+ SQLite + manifest + validation report + density/search indexes + optional reference
                               |
                               v
                read-only localhost FastAPI service
@@ -26,7 +26,7 @@ raw GTF + transcript/protein FASTA + feature RDS + verified reference
 
 The normal server binds only to `127.0.0.1`. It does not enable permissive CORS, telemetry, remote fonts, hosted genomes, remote search, BLAT, analytics, or CDN assets.
 
-Normal startup accepts only a full package whose manifest, SQLite metadata, validation report, schema, release/assembly identifiers, counts, canonical hashes, density levels, database digest, and reference receipt agree. The SP1 acceptance package is reachable only through `--dev-fixture`. Slow full SQLite and reference rehashes are available as explicit release gates without making ordinary startup unbounded.
+Normal startup accepts only a full package whose manifest, SQLite metadata, validation report, schema, release/assembly identifiers, counts, canonical hashes, density levels, and database digest agree. An optional reference receipt is checked when a reference is present. The SP1 acceptance package is reachable only through `--dev-fixture`. Slow full SQLite and optional-reference rehashes are available as explicit release gates without making ordinary startup unbounded.
 
 ## Desktop launcher boundary
 
@@ -129,7 +129,7 @@ Complete density tiles contain zero-count bins as well as occupied bins, so an o
 
 ## Reference boundary
 
-Reference sequence is treated as build input, never fetched at runtime. The manifest pins its checksum, assembly, contig aliases, and FAI checksum. Startup fails before serving the application if those values do not match. The multi-gigabyte FASTA/FAI remain checksum-declared external symlink targets; the portable manifests, aliases, sizes, and receipts are copied with the package. A separately named development-fixture mode may run the SP1 slice without claiming a complete whole-genome build.
+Reference sequence is an optional build input, never fetched at runtime. When supplied, the manifest pins its checksum, assembly, contig aliases, and FAI checksum; startup fails before serving reference ranges if those values do not match. The multi-gigabyte FASTA/FAI remain checksum-declared external symlink targets; the portable manifests, aliases, sizes, and receipts are copied with the package. Without that input, a full annotation package still serves transcript models, transcript/protein sequences, and protein features; only reference-range capability is absent.
 
 ## Build publication and reproducibility
 

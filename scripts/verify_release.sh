@@ -68,7 +68,6 @@ from backend.app.main import create_app
 app = create_app(
     project_root=Path.cwd(),
     full_database_verify=True,
-    full_reference_verify=True,
 )
 package = app.state.runtime_package
 if package.technical_preview:

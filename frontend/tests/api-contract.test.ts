@@ -23,6 +23,24 @@ test("manifest normalization preserves the immutable build and verified local re
   assert.deepEqual(manifest.featureSources, ["interpro", "pfam", "mobidblite"]);
 });
 
+test("manifest normalization keeps a full transcript package valid without a reference", () => {
+  const manifest = normalizeManifest({
+    schemaVersion: "1.1.0",
+    buildHash: "annotation-only-build",
+    release: "GENCODE v45",
+    ensemblRelease: 111,
+    assembly: "GRCh38.p14",
+    technicalPreview: false,
+    scope: "full",
+    featureSources: ["interpro", "pfam"],
+    capabilities: { search: true, region: true, reference_ranges: false },
+    reference: { available: false, verified: false },
+  });
+  assert.equal(manifest.technicalPreview, false);
+  assert.equal(manifest.referenceAvailable, false);
+  assert.equal(manifest.reference?.url, undefined);
+});
+
 test("search normalization retains owning gene/transcript identity for cross-gene jumps", () => {
   const results = normalizeSearchPayload({
     results: [{

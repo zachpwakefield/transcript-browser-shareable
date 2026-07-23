@@ -43,15 +43,17 @@ The GitHub Actions workflow repeats these checks on a clean runner.
 
 ## 2. Build the small SP1 acceptance fixture
 
-Use a local, audited GENCODE v45/Ensembl 111 cache and the matching indexed
-GRCh38.p14 reference FASTA. Keep both outside Git (the paths below are
-placeholders):
+Use a local, audited GENCODE v45/Ensembl 111 cache. A whole-genome reference is
+optional and is only needed to exercise the reference-range endpoint; keep all
+generated inputs outside Git (the paths below are placeholders):
 
 ```bash
 ./scripts/build_annotations.sh /path/to/annotation-cache \
-  --reference-fasta /path/to/Homo_sapiens.GRCh38.dna.toplevel.fa \
   --scope sp1
 ```
+
+To include the optional reference capability, add
+`--reference-fasta /path/to/Homo_sapiens.GRCh38.dna.toplevel.fa`.
 
 The builder filters the authoritative GTF to the `SP1` locus and writes the
 ignored package at `data/builds/sp1_fixture/`. It then runs the acceptance
@@ -149,8 +151,10 @@ been produced, run:
 ```
 
 That gate checks the full manifest, two-build determinism, all Python/backend
-and frontend tests, the offline bundle audit, full database/reference startup,
-and FileProvider-conflict filenames. The separate human gates—fresh-machine
+and frontend tests, the offline bundle audit, full database startup, and
+FileProvider-conflict filenames. If an optional reference is present, run
+`./run_local.sh --full-reference-verify` separately to exercise its slow
+checksum path. The separate human gates—fresh-machine
 replay, cross-browser interaction review, performance review, and biological
 interpretation review—are listed in [`release_checklist.md`](release_checklist.md).
 

@@ -38,7 +38,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--full-reference-verify",
         action="store_true",
-        help="Recompute SHA-256 for all reference artifacts before serving (slow).",
+        help=(
+            "If an optional whole-genome reference is present, recompute its "
+            "SHA-256 artifacts before serving (slow)."
+        ),
     )
     parser.add_argument(
         "--full-database-verify",

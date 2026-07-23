@@ -1620,7 +1620,7 @@ export default function App() {
             <span aria-hidden="true">TB</span>
             <div>
               <strong>{manifestState === "loading" ? "Verifying the immutable local build…" : geneState === "loading" ? `Loading ${view.selectedGeneId}…` : "No verified local annotation is loaded"}</strong>
-              <p>{manifestState === "error" ? "The genomic workspace remains closed until the manifest, schema, and reference checks pass." : "Transcript models will appear after local validation; no fixture or network substitute is rendered."}</p>
+              <p>{manifestState === "error" ? "The genomic workspace remains closed until the manifest and schema checks pass." : "Transcript models will appear after local validation; no fixture or network substitute is rendered."}</p>
             </div>
           </section>
         )}

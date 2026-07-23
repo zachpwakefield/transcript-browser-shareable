@@ -67,7 +67,6 @@ The following commands create a complete local build. Run them from a fresh clon
 - Python 3.9+ for the API and builder (the lock file is tested across the supported Python range).
 - Node.js 22.13+ and pnpm 11.7+ for the production frontend.
 - R and Bioconductor for the [SpliceImpactR package](https://bioconductor.org/packages/release/bioc/html/SpliceImpactR.html); the current Bioconductor release is designed for R 4.6, and the package is needed only during data preparation.
-- `samtools` for the reference FASTA index.
 - Network access during preparation only. Runtime browsing is local/offline.
 
 ```bash
@@ -92,18 +91,10 @@ Rscript scripts/prepare_spliceimpactr_cache.R \
   --output data/cache \
   --base-dir data/spliceimpactr-cache
 
-# Obtain the matching Ensembl release-115 GRCh38.p14 reference FASTA,
-# decompress it, and create the adjacent .fai with samtools.
-mkdir -p data/reference
-# Download the official release-115 .fa.gz into data/reference first.
-gunzip -c data/reference/Homo_sapiens.GRCh38.dna.toplevel.fa.gz \
-  > data/reference/Homo_sapiens.GRCh38.dna.toplevel.fa
-samtools faidx data/reference/Homo_sapiens.GRCh38.dna.toplevel.fa
-
-# Build and validate the immutable SQLite package.
-./scripts/build_annotations.sh data/cache \
-  --reference-fasta data/reference/Homo_sapiens.GRCh38.dna.toplevel.fa \
-  --scope full
+# Build and validate the immutable SQLite package. A whole-genome reference
+# is optional; transcript, sequence, and protein-feature browsing works without
+# it. See docs/reference_setup.md only if byte-range reference serving is wanted.
+./scripts/build_annotations.sh data/cache --scope full
 
 # Start the local browser.
 ./run_local.sh
@@ -127,7 +118,7 @@ SpliceImpactR (Bioconductor release)
 data/cache/*.rds + raw GENCODE .gz files
           │
           ▼
-streaming Python builder + Ensembl 115 GRCh38.p14 FASTA/.fai
+streaming Python builder + optional GRCh38.p14 reference
           │
           ▼
 validated immutable data/builds/gencode_v45/annotation.sqlite
@@ -144,7 +135,7 @@ loopback API + React/Canvas browser
 | --- | --- | --- |
 | Gene/transcript/protein assets | GENCODE human v45 | Defines the transcript models and sequence records shown by the browser. |
 | BioMart protein features | Ensembl release 111 | Release paired with GENCODE v45 in this browser contract. |
-| Reference FASTA | Ensembl release 115, GRCh38.p14 | Used for verified byte-range reference serving; the builder checks its FASTA and `.fai` digests. |
+| Optional reference FASTA | Ensembl release 115, GRCh38.p14 | Enables verified byte-range reference serving when supplied; it is not required for transcript/protein browsing. |
 
 Do not mix releases casually. If a new annotation release is desired, treat it as a new scientific build: update the release contract, expected counts/checksums, tests, and review notes together.
 
@@ -225,9 +216,9 @@ clean_name  alt_name  database  ensembl_peptide_id  method  name
 
 Protein coordinates are 1-based inclusive amino-acid intervals. The browser's SQLite and API geometry uses 0-based half-open genomic intervals; visible labels and copied prose use 1-based inclusive coordinates. Read [`docs/coordinate_contract.md`](docs/coordinate_contract.md) before changing projection code.
 
-The Python builder validates required filenames, feature columns, release lineage, row/count audits, checksums, translation mappings, primary-contig lengths, and reference index integrity before atomically publishing a build. A failed validation is a stop condition, not a warning to ignore.
+The Python builder validates required filenames, feature columns, release lineage, row/count audits, checksums, translation mappings, and primary-contig lengths before atomically publishing a build. If an optional whole-genome reference is supplied, its FASTA/index integrity is validated as well. A failed validation is a stop condition, not a warning to ignore.
 
-The generated database and reference are intentionally ignored by Git. Do not commit them unless a separate data-release, licensing, and redistribution decision explicitly authorizes it.
+The generated database and optional reference are intentionally ignored by Git. Do not commit them unless a separate data-release, licensing, and redistribution decision explicitly authorizes it.
 
 ## Run and use the browser
 
@@ -237,7 +228,7 @@ The generated database and reference are intentionally ignored by Git. Do not co
 ./run_local.sh                         # normal full validated package
 ./run_local.sh --dev-fixture            # explicitly labeled SP1 development fixture
 ./run_local.sh --port 8765 --open      # choose a port and open the browser
-./run_local.sh --full-database-verify --full-reference-verify
+./run_local.sh --full-database-verify
 ```
 
 Normal startup refuses a missing, stale, technical-preview, checksum-invalid, or lineage-inconsistent package. The development fixture is never silently substituted for a full build.
@@ -263,7 +254,7 @@ The SP1 fixture is a development/acceptance aid and is not included in this sour
 - **Persistence:** URL/deep-link state, validated last-view restore, browser-local notes/tags, portable session merge with conflict reporting, and private diagnostics that redact home-directory paths and non-loopback origins.
 - **Keyboard/interaction:** `/` focuses global search, `J`/`K` move through current-gene transcripts, `P` toggles a pin, `C` opens comparison, `Shift+C` assigns comparison context, and Page/Home/End operate the transcript viewport when focus is outside editing controls.
 - **Output:** JSON/TSV machine exports, one-gene CSV/TSV comparison exports, exact sequence excerpts, and bounded PDF reports. Requests exceeding safety limits are refused instead of silently truncated.
-- **Runtime/API:** read-only manifest, search, region, gene, transcript, feature, sequence, export, reference-range, health, and PDF endpoints served from the same loopback origin as the production frontend.
+- **Runtime/API:** read-only manifest, search, region, gene, transcript, feature, sequence, export, health, and PDF endpoints served from the same loopback origin as the production frontend. Reference-range endpoints are available only when an optional verified reference is supplied.
 
 The main API surface is intentionally small and read-only: `GET /api/v1/health`, `/manifest`, `/search`, `/region`, `/genes/{identifier}`, `/transcripts/{identifier}`, `/transcripts/{identifier}/features`, `/transcripts/{identifier}/sequence`, `/features/{feature_id}`, and `/export`; `POST /api/v1/report/pdf` creates a bounded local report. The frontend is the reference client, but these endpoints make the built package useful for scripts and reproducible local analysis as well.
 
@@ -325,8 +316,8 @@ data/builds/                 generated local builds only; ignored by Git
 - **SpliceImpactR will not install:** use the R/Bioconductor release listed on its [Bioconductor package page](https://bioconductor.org/packages/release/bioc/html/SpliceImpactR.html), then rerun `./scripts/install_spliceimpactr.sh`. The browser does not need SpliceImpactR at runtime.
 - **The adapter says a source is missing:** provide all three raw GENCODE paths together, or remove a partially prepared output and rerun without `--skip-exon`.
 - **A feature checksum or count fails:** keep the GENCODE/Ensembl pairing and `--filter-tsl` setting consistent. Do not edit the builder manifest by hand.
-- **Reference verification fails:** follow [`docs/reference_setup.md`](docs/reference_setup.md) and regenerate the `.fai` with the same FASTA bytes.
-- **Normal startup refuses the package:** rebuild with `scripts/build_annotations.sh data/cache --reference-fasta data/reference/Homo_sapiens.GRCh38.dna.toplevel.fa`; normal mode requires a full validated build.
+- **Optional reference verification fails:** follow [`docs/reference_setup.md`](docs/reference_setup.md) and regenerate the index with the same FASTA bytes, or omit the optional reference for transcript/protein-only browsing.
+- **Normal startup refuses the package:** rebuild with `scripts/build_annotations.sh data/cache --scope full`; normal mode requires a full validated annotation build, but not a whole-genome reference.
 - **A 26th protein row will not open:** simultaneous expansion is intentionally capped at 25. Collapse a row before opening another.
 - **Notes or recents differ between browsers:** they are profile-local by design. Use explicit session export/import when transferring local workspace state.
 - **Frontend installation fails in CI or a restricted network:** run `pnpm install --frozen-lockfile` in a networked environment; no frontend dependency tree is checked in.

@@ -28,20 +28,20 @@ Build a focused, offline-first local web application with:
 
 The architecture must pass an early SP1 technical spike before the full product is built. The spike proves that an expanded transcript row can change height, remain aligned during pan/zoom, support accurate hit-testing, and restore its state from the URL. If the igv.js custom-track extension is unstable, retain the same React, API, and database design but replace only the genome viewport with a custom DOM + Canvas2D renderer.
 
-The local cache is sufficient for the annotation and protein-feature layers, but it is **not by itself sufficient for the final igv.js application**, because it contains transcript/protein FASTAs but no whole-genome GRCh38 FASTA or 2bit file. A checksum-verified local GRCh38 reference sequence is therefore the one additional required data prerequisite for version 1. It may be supplied as a 2bit file or as BGZF FASTA plus FAI/GZI; it is acquired once during setup and is never fetched at runtime.
+The local cache is sufficient for the annotation and protein-feature layers. A whole-genome GRCh38 reference is an optional capability for version 1: when supplied, it may be a checksum-verified 2bit file or BGZF FASTA plus FAI/GZI acquired once during setup and never fetched at runtime. The transcript/protein browser remains complete without that optional reference.
 
-Accurate chromosome bounds are mandatory. The implementation should bundle a small provenance-stamped, checksum-pinned **GRCh38.p14 primary-contig chrom.sizes** manifest alongside the reference. It must never infer chromosome length from the last annotated feature.
+Accurate chromosome bounds are mandatory. The annotation package should bundle a small provenance-stamped, checksum-pinned **GRCh38.p14 primary-contig length** manifest (or equivalent database rows) and must never infer chromosome length from the last annotated feature. A `chrom.sizes` file is only needed when the optional whole-genome reference capability is enabled.
 
 System flow:
 
-    Raw GTF + transcript/protein FASTAs + feature RDS + reference + chrom.sizes
+Raw GTF + transcript/protein FASTAs + feature RDS + optional reference + chrom.sizes
                                    │
                                    ▼
                     Deterministic annotation builder
                   parse → normalize → project → validate
                                    │
                                    ▼
-                 SQLite + manifest + local reference index
+                SQLite + manifest + optional reference index
                                    │
                                    ▼
                       Local FastAPI read-only service
@@ -401,13 +401,13 @@ SP1-203 has a 230-aa local protein sequence but no local feature rows. The UI sh
 
 ### 8.5 Data gaps
 
-- No whole-genome GRCh38 FASTA/2bit, FAI/GZI, chromosome-size file, or cytoband file is present in the cache. Version 1 must add a checksum-matched local reference sequence and a provenance-stamped GRCh38.p14 chrom.sizes manifest; cytobands remain optional.
+- No whole-genome GRCh38 FASTA/2bit, FAI/GZI, chromosome-size file, or cytoband file is present in the cache. The browser can ship without a whole-genome reference; an optional reference capability may add a checksum-matched local sequence and provenance-stamped GRCh38.p14 chrom.sizes manifest. Cytobands remain optional.
 - No noncoding transcript FASTA.
 - No gene synonym/alias catalog beyond names and IDs in the GTF; broader alias search requires an optional local HGNC import.
 - No feature confidence scores or source-release metadata.
 - No variants, repeats, expression, conservation, or regulatory data.
 
-The reference-sequence/chromosome-manifest gap must be resolved in Phase 0 because igv.js requires a local reference definition. The remaining gaps are honest scope boundaries and do not block the first release.
+The reference-sequence/chromosome-manifest gap is an optional capability boundary rather than a blocker for transcript/protein browsing. If a genome-sequence adapter is enabled, it must use a local reference definition; otherwise the remaining gaps are honest scope boundaries and do not block the first release.
 
 ## 9. Preprocessing and build pipeline
 
@@ -438,7 +438,7 @@ Optional:
    - Compute SHA-256 checksums.
    - Read release/assembly metadata.
    - Refuse to silently mix assemblies or releases.
-   - Validate the reference and chrom.sizes checksums against the bundled v45/GRCh38.p14 release manifest.
+   - If supplied, validate the optional reference and chrom.sizes checksums against the bundled v45/GRCh38.p14 release manifest.
 
 2. **Parse the raw GTF**
    - Stream 3,427,477 records.
@@ -575,7 +575,7 @@ API behavior:
 - Round regional cache keys to genomic tiles and include the detail tier or normalized bp-per-pixel bucket, so density and transcript responses cannot collide.
 - Enforce result and coordinate-span limits.
 - Use cancellable frontend requests so rapid panning does not queue stale work.
-- Serve the required genomic reference same-origin with correct HTTP range headers and 206 responses as required by igv.js.
+- If an optional genomic reference is supplied, serve it same-origin with correct HTTP range headers and 206 responses as required by the genome-sequence adapter.
 
 ## 12. Frontend architecture
 
@@ -626,8 +626,7 @@ The application workspace owns vertical scrolling. The igv.js custom track must 
 
 Target commands:
 
-    ./scripts/build_annotations.sh /path/to/annotation-cache \
-      --reference-fasta /path/to/Homo_sapiens.GRCh38.dna.toplevel.fa
+    ./scripts/build_annotations.sh /path/to/annotation-cache
     ./run_local.sh
 
 Expected behavior:
@@ -655,7 +654,7 @@ Proposed output package:
             annotation.sqlite
             manifest.json
             validation_report.json
-            reference/          # required 2bit or indexed FASTA, chrom.sizes, checksums
+            reference/          # optional indexed FASTA/2bit, chrom.sizes, checksums
       run_local.sh
 
 ## 14. Efficiency and performance plan
@@ -708,7 +707,7 @@ The application should be explicitly designed around the failure modes visible i
 - Invalid IDs and coordinates receive precise local errors and suggestions.
 - Build/schema mismatch stops startup with a remediation command.
 - Empty feature sets are shown as valid empty states.
-- Distinguish and explain: no annotated gene in region, no local features for a translated protein, sequence absent from the cache, and a pinned entity outside the current viewport. A missing or checksum-invalid genomic reference is a startup validation failure with the exact remediation command, not a half-functional browser state.
+- Distinguish and explain: no annotated gene in region, no local features for a translated protein, sequence absent from the cache, a pinned entity outside the current viewport, and the optional reference-range capability being unavailable. A supplied-but-invalid reference remains a startup validation failure with the exact remediation command; an omitted reference is an honest capability boundary, not a half-functional browser state.
 
 ## 16. Test strategy
 
@@ -737,7 +736,7 @@ The application should be explicitly designed around the failure modes visible i
 - Correct level-of-detail responses.
 - Bounded pagination and span limits.
 - ETag/build-hash behavior.
-- Required reference range requests return 206, Content-Range, and Accept-Ranges.
+- When the optional reference capability is enabled, reference range requests return 206, Content-Range, and Accept-Ranges.
 
 ### 16.3 UI and end-to-end tests
 
@@ -758,7 +757,7 @@ The application should be explicitly designed around the failure modes visible i
 - Verify a selected transcript remains visible across semantic-detail thresholds.
 - Verify gene grouping and neighboring-gene treatment at a dense multi-gene locus.
 - Verify tiny and exactly overlapping features through pointer, chooser, keyboard, and table access.
-- Verify all distinct empty/off-screen states: no gene in region, no features, missing transcript sequence, and selected entity outside the viewport; separately verify the missing/invalid-reference startup remediation.
+- Verify all distinct empty/off-screen states: no gene in region, no features, missing transcript sequence, selected entity outside the viewport, and reference-range capability unavailable without an optional reference; separately verify supplied-but-invalid-reference remediation.
 
 ### 16.4 Usability acceptance tasks
 
@@ -922,7 +921,7 @@ Expected shape:
 |---|---|---|
 | igv.js custom-track hooks are not a fully documented public extension contract | Dynamic rows could break after upgrades | Pin exact version, isolate adapter, test in Phase 1, never fork, retain custom-Canvas fallback |
 | Raw GTF and processed RDS differ materially | Missing transcripts/tags and misleading UI | Raw GTF/FASTA are authoritative; RDS is helper only; count/tag fixtures, SP1 four-transcript gate |
-| No genomic reference sequence in the supplied cache | igv.js cannot operate fully offline and base-level browsing is impossible | Make a checksum-matched local GRCh38.p14 2bit or indexed FASTA a Phase 0 prerequisite; disable all remote igv.js defaults |
+| No genomic reference sequence in the supplied cache | Base-level reference browsing is unavailable | Keep transcript/protein browsing fully local without it; if reference browsing is enabled, require a checksum-matched local GRCh38.p14 2bit or indexed FASTA and disable all remote defaults |
 | 1-based/0-based and inclusive/half-open confusion | Off-by-one biological errors | One internal convention, typed coordinate helpers, round-trip and boundary fixtures |
 | Reverse-strand domain projection | Incorrect exon mapping | Transcript-ordered CDS algorithm, negative-strand golden fixtures, coverage invariants |
 | Overlapping/duplicated biological predictions | Visual clutter or false consensus | Keep source records separate, stack lanes, filter by class/source, optional later consensus mode |
@@ -947,7 +946,7 @@ Recommended defaults:
 Optional later decisions:
 
 - Add a local HGNC alias file
-- Add optional cytobands and chromosome aliases beyond the required reference/chrom.sizes assets
+- Add optional cytobands and chromosome aliases beyond the optional reference/chrom.sizes assets
 - Expose hybrid first/last-exon relationships as an analysis mode
 - Add user-supplied BED/GFF/BigWig/VCF tracks
 - Package with Tauri for a native app shell
@@ -960,7 +959,7 @@ Version 1 is complete when:
 
 - It launches locally through one documented command after one deterministic annotation build.
 - It makes no external runtime request.
-- It verifies the local reference and release manifest, then identifies itself as GENCODE v45 / Ensembl 111 / GRCh38.p14.
+- It identifies itself as GENCODE v45 / Ensembl 111 / GRCh38.p14 and, when the optional reference is supplied, verifies its local reference and release manifest.
 - Search works for symbols, transcript names, coordinates, and versioned/unversioned stable IDs.
 - Genome panning, zooming, ruler selection, fit, and locus history are responsive.
 - SP1 shows all four raw-v45 transcripts.
@@ -976,7 +975,7 @@ Version 1 is complete when:
 
 ## 21. Recommended immediate next action
 
-First, add and checksum-verify the matching local GRCh38.p14 reference plus chrom.sizes/release manifest. Then implement only the Phase 1 SP1 spike before committing to the complete UI. It converts the highest-risk assumptions into observable evidence:
+First, build the annotation-only package and implement the Phase 1 SP1 spike before committing to the complete UI. Add and checksum-verify the matching local GRCh38.p14 reference plus chrom.sizes/release manifest only when exercising optional reference-range serving. The spike converts the highest-risk assumptions into observable evidence:
 
 - raw-vs-RDS completeness,
 - versioned-ID joins,

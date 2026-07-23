@@ -96,7 +96,7 @@ The interface distinguishes:
 - a partial or unresolved translation that can show a continuous amino-acid annotation but no genomic projection; and
 - a pinned transcript or selected gene outside the current genomic view.
 
-The last case preserves context and offers **Return to transcript/gene**. Reference, package, checksum, schema, or build-lineage failures stop normal startup with remediation rather than producing a half-functional browser.
+The last case preserves context and offers **Return to transcript/gene**. Package, checksum, schema, or build-lineage failures stop normal startup with remediation rather than producing a half-functional browser. An optional whole-genome reference may be absent; in that case only reference-range capability is unavailable.
 
 ## Preserve and export a view
 
@@ -157,8 +157,8 @@ Displayed loci and copied prose are 1-based inclusive. SQLite, the JSON API, cac
 
 ## Troubleshooting
 
-- **Normal startup refuses the package:** rebuild with `./scripts/build_annotations.sh data/cache --reference-fasta data/reference/Homo_sapiens.GRCh38.dna.toplevel.fa`, then rerun. Add `--full-database-verify` or `--full-reference-verify` to the launcher for the slow release-grade integrity gates.
-- **A reference receipt/checksum fails:** follow `docs/reference_setup.md`; do not edit the active manifest by hand.
+- **Normal startup refuses the package:** rebuild with `./scripts/build_annotations.sh data/cache --scope full`, then rerun. Add `--full-database-verify` to the launcher for the slow database integrity gate; use `--full-reference-verify` only when the optional reference is present.
+- **An optional reference receipt/checksum fails:** follow `docs/reference_setup.md`, or omit the reference and rebuild the transcript/protein-only package; do not edit the active manifest by hand.
 - **A search is missing an alias:** v1 indexes local GTF names and stable IDs. It does not claim a complete HGNC synonym catalog or typo-tolerant search.
 - **The previous view did not restore:** an explicit URL takes priority, restoration may be disabled, or the saved workspace may belong to another annotation build/browser profile. Open the View settings before assuming data loss.
 - **A 26th protein row will not open:** simultaneous protein-feature expansion is intentionally bounded to 25 rows. Collapse any open protein row, then expand the additional transcript.

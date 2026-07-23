@@ -473,7 +473,6 @@ def _load_reference(
     package_root: Path,
     outer_manifest: Mapping[str, Any],
     *,
-    required: bool,
     full_verify: bool,
 ) -> ReferencePackage | None:
     outer_reference = outer_manifest.get("reference")
@@ -481,13 +480,10 @@ def _load_reference(
         outer_reference = {}
     available = _as_bool(outer_reference.get("available", False))
     if not available:
-        if required:
-            raise StartupValidationError(
-                "Verified whole-genome GRCh38.p14 reference is unavailable. Normal mode "
-                "will not start a half-functional browser. Supply the checksum-matched "
-                "reference and rerun scripts/build_annotations.sh, or use --dev-fixture "
-                "for the explicitly labeled SP1 technical preview."
-            )
+        # Transcript models, transcript/protein sequences, and protein-feature
+        # projections are complete without the optional whole-genome FASTA.
+        # Keep reference range serving capability-scoped instead of blocking a
+        # full annotation package at startup.
         return None
 
     reference_root_raw = str(outer_reference.get("directory", "reference"))
@@ -933,7 +929,6 @@ def load_runtime_package(
     reference = _load_reference(
         package_root,
         manifest,
-        required=not dev_fixture,
         full_verify=full_reference_verify,
     )
     return RuntimePackage(

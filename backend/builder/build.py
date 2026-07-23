@@ -1,8 +1,9 @@
 """Command-line deterministic GENCODE v45 annotation builder.
 
 The SP1 scope is a vertical acceptance fixture built from the authoritative raw
-GTF and FASTAs. The full scope uses the same streaming path and refuses to run
-without the checksum-pinned local GRCh38.p14 reference.
+GTF and FASTAs. The full scope uses the same streaming path. A checksum-pinned
+GRCh38.p14 reference can be supplied for optional byte-range serving, but it is
+not required for transcript, sequence, or protein-feature browsing.
 """
 
 from __future__ import annotations
@@ -203,7 +204,9 @@ def parse_fai(path: Path) -> dict[str, int]:
     return contigs
 
 
-def validate_reference(reference_fasta: Path) -> dict[str, Any]:
+def validate_reference(reference_fasta: Path | None) -> dict[str, Any] | None:
+    if reference_fasta is None:
+        return None
     reference_fasta = reference_fasta.resolve()
     reference_fai = Path(f"{reference_fasta}.fai")
     if not reference_fasta.is_file() or not reference_fai.is_file():
@@ -325,6 +328,7 @@ def write_reference_package(
     write_json(reference_directory / "verification_receipt.json", receipt)
 
     manifest = {
+        "available": True,
         "assembly": ASSEMBLY,
         "verified": True,
         "verification_receipt": "verification_receipt.json",
@@ -1387,7 +1391,9 @@ def build(args: argparse.Namespace) -> Path:
 
     with build_lock(output_root):
         stage_started = time.perf_counter()
-        progress(f"validating {args.scope} inputs, R environment, and local reference")
+        progress(
+            f"validating {args.scope} inputs, R environment, and optional local reference"
+        )
         build_timestamp = deterministic_timestamp(
             source / "gencode.v45.annotation.gtf.gz"
         )
@@ -1458,8 +1464,14 @@ def build(args: argparse.Namespace) -> Path:
             progress("materialized density pyramid, search corpus, and interval indexes")
 
             stage_started = time.perf_counter()
-            reference_manifest = write_reference_package(
-                staging, reference, build_timestamp
+            reference_manifest = (
+                write_reference_package(staging, reference, build_timestamp)
+                if reference is not None
+                else {
+                    "available": False,
+                    "verified": False,
+                    "fai_contig_count": 0,
+                }
             )
             content_hashes = canonical_table_hashes(connection)
             finish_stage("reference_package_and_content_hashes", stage_started)
@@ -1476,8 +1488,12 @@ def build(args: argparse.Namespace) -> Path:
                 "builder_version": BUILDER_VERSION,
                 "scope": args.scope,
                 "inputs": stable_inputs,
-                "reference_sha256": reference["fasta_sha256"],
-                "reference_fai_sha256": reference["fai_sha256"],
+                "reference_sha256": (
+                    reference["fasta_sha256"] if reference is not None else None
+                ),
+                "reference_fai_sha256": (
+                    reference["fai_sha256"] if reference is not None else None
+                ),
                 "toolchain_hashes": build_toolchain_hashes,
                 "content_hashes": content_hashes,
             }
@@ -1524,6 +1540,20 @@ def build(args: argparse.Namespace) -> Path:
                 connection
             )
 
+            manifest_reference = (
+                {
+                    "available": True,
+                    "verified": True,
+                    "directory": "reference",
+                    "manifest": "reference_manifest.json",
+                    "verification_receipt": "verification_receipt.json",
+                    "fasta_public_path": "reference/genome.fa",
+                    "fai_public_path": "reference/genome.fa.fai",
+                    "resolved_fasta_target": str(reference["fasta_path"]),
+                }
+                if reference is not None
+                else {"available": False, "verified": False}
+            )
             manifest = {
                 "schema_version": SCHEMA_VERSION,
                 "builder_version": BUILDER_VERSION,
@@ -1534,16 +1564,7 @@ def build(args: argparse.Namespace) -> Path:
                 "scope": args.scope,
                 "technical_preview": args.scope == "sp1",
                 "created_at": build_timestamp,
-                "reference": {
-                    "available": True,
-                    "verified": True,
-                    "directory": "reference",
-                    "manifest": "reference_manifest.json",
-                    "verification_receipt": "verification_receipt.json",
-                    "fasta_public_path": "reference/genome.fa",
-                    "fai_public_path": "reference/genome.fa.fai",
-                    "resolved_fasta_target": str(reference["fasta_path"]),
-                },
+                "reference": manifest_reference,
                 "feature_sources": [
                     {
                         "name": source_name,
@@ -1557,7 +1578,7 @@ def build(args: argparse.Namespace) -> Path:
                     "sequences": True,
                     "protein_features": True,
                     "genomic_feature_projection": True,
-                    "reference_ranges": True,
+                    "reference_ranges": reference is not None,
                     "full_annotation": args.scope == "full",
                     "density_tiles": True,
                 },
@@ -1588,6 +1609,7 @@ def build(args: argparse.Namespace) -> Path:
                 "features": feature_summary,
                 "feature_export": export_manifest,
                 "reference": {
+                    "available": reference_manifest["available"],
                     "verified": reference_manifest["verified"],
                     "fai_contig_count": reference_manifest["fai_contig_count"],
                     "primary_contig_count": len(PRIMARY_CONTIG_LENGTHS),
@@ -1607,6 +1629,22 @@ def build(args: argparse.Namespace) -> Path:
                     "Validation failed: " + "; ".join(validation_errors[:10])
                 )
             finish_stage("validation_and_finalize", stage_started)
+            builder_invocation = [
+                sys.executable,
+                "-m",
+                "backend.builder.build",
+                "--source",
+                str(source),
+                "--output-root",
+                str(output_root),
+                "--scope",
+                args.scope,
+            ]
+            if args.reference_fasta is not None:
+                builder_invocation.extend(
+                    ["--reference-fasta", str(args.reference_fasta.resolve())]
+                )
+            builder_invocation.extend(["--rscript", args.rscript])
             write_build_metrics(
                 staging,
                 build_hash=build_hash,
@@ -1614,21 +1652,7 @@ def build(args: argparse.Namespace) -> Path:
                 stage_seconds=stage_seconds,
                 database_path=database_path,
                 invocation={
-                    "command": [
-                        sys.executable,
-                        "-m",
-                        "backend.builder.build",
-                        "--source",
-                        str(source),
-                        "--output-root",
-                        str(output_root),
-                        "--scope",
-                        args.scope,
-                        "--reference-fasta",
-                        str(args.reference_fasta.resolve()),
-                        "--rscript",
-                        args.rscript,
-                    ],
+                    "command": builder_invocation,
                     "published_target": str(target),
                 },
             )
@@ -1659,10 +1683,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--reference-fasta",
         type=Path,
-        required=True,
         help=(
-            "Path to the checksum-pinned Ensembl GRCh38.p14 reference FASTA; "
-            "the adjacent .fai index must also exist"
+            "Optional path to the checksum-pinned Ensembl GRCh38.p14 reference "
+            "FASTA; the adjacent .fai index must also exist when supplied"
         ),
     )
     parser.add_argument("--rscript", default=shutil.which("Rscript") or "Rscript")

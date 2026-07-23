@@ -291,7 +291,9 @@ export function FilterBar({
         <span aria-hidden="true">◇</span>
         {manifest.referenceAvailable
           ? "Custom Canvas · verified local reference"
-          : "Technical fixture · reference unavailable"}
+          : manifest.technicalPreview
+            ? "Technical fixture · reference unavailable"
+            : "Custom Canvas · transcript package only"}
       </div>
     </div>
   );

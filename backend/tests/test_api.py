@@ -572,6 +572,33 @@ class ApiTests(unittest.TestCase):
             with self.assertRaisesRegex(StartupValidationError, "scope=full"):
                 create_app(project_root=root, package_root=package, dev_fixture=False)
 
+    def test_full_package_can_start_without_optional_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            package = make_package(root, technical_preview=False)
+            app = create_app(
+                project_root=root,
+                package_root=package,
+                dev_fixture=False,
+                full_reference_verify=True,
+            )
+            client = TestClient(app, base_url="http://127.0.0.1")
+
+            manifest = client.get("/api/v1/manifest")
+            self.assertEqual(manifest.status_code, 200)
+            payload = manifest.json()
+            self.assertFalse(payload["reference"]["available"])
+            self.assertFalse(payload["capabilities"]["reference"])
+            self.assertFalse(payload["capabilities"]["wholeGenomeReference"])
+            self.assertEqual(
+                client.get("/reference/genome.fa").status_code,
+                404,
+            )
+            self.assertEqual(
+                client.get("/api/v1/search", params={"q": "SP1"}).status_code,
+                200,
+            )
+
     def test_normal_mode_refuses_validation_report_without_content_hashes(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
