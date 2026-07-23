@@ -1,0 +1,999 @@
+---
+title: "SpliceImpactR"
+author:
+- name: Zachary Wakefield
+  affiliation:
+  - &1 Boston University, Boston, MA
+  - &2 Bioinformatics Program, Boston University, Boston, MA
+- name: Ana Fiszbein
+  affiliation:
+  - *1
+  - *2
+date: '`r format(Sys.Date(), "%B %e, %Y")`'
+package: SpliceImpactR
+output:
+    BiocStyle::html_document
+vignette: >
+    %\VignetteIndexEntry{SpliceImpactR}
+    %\VignetteEncoding{UTF-8}
+    %\VignetteEngine{knitr::rmarkdown}
+editor_options:
+    chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 4.5
+)
+library(SpliceImpactR)
+library(BiocParallel)
+```
+
+# Overview
+`SpliceImpactR` links differential splicing to protein-level outcomes,
+including sequence changes, domain gain/loss, and potential PPI rewiring.
+
+**SpliceImpactR** is a self-contained and efficient pipeline designed
+to identify how alternative RNA processing events affect resulting
+proteins. After initial alternative RNA processing quantification,
+the method runs entirely within **R** and does not require additional
+external software.
+
+The pipeline begins by importing alternative RNA processing events
+that differ across conditions. It is built to support highly flexible
+input, requiring only inclusion and exclusion coordinates for each
+event isoform. This makes it compatible with both user-defined events
+and outputs from existing tools.
+
+Custom input functions detect multiple classes of alternative RNA
+processing, including alternative first exons (**AFE**), hybrid first
+exons (**HFE**), retained introns (**RI**), skipped exons (**SE**),
+alternative 5′ and 3′ splice sites (**A5SS** and **A3SS**), mutually
+exclusive exons (**MXE**), hybrid last exons (**HLE**), and alternative
+last exons (**ALE**).
+
+SpliceImpactR then performs differential inclusion analysis to
+identify condition-specific transcript pairs that differ by at least
+one alternative RNA processing event. These events are mapped to
+transcript and protein annotations to evaluate their effects on
+coding potential, sequence similarity, and frameshifts.
+
+The pipeline next uses curated and user-provided protein feature sets
+to annotate domain-level changes, assess shifts in domain usage across
+conditions, and integrate domain-domain interaction data,
+domain-motif interaction data, and protein-protein interaction
+information to predict downstream effects on protein interaction
+networks.
+
+Finally, SpliceImpactR performs a global analysis to detect
+co-regulated splicing events and quantify the relative contribution
+of each alternative RNA processing type. The pipeline is also
+available through an **R Shiny** interface to improve accessibility
+and ease of use.
+
+SpliceImpactR is built to handle both `S4` `SpliceImpactResult` object with 
+custom accession functions and standard `data.table` input / workflow.
+`SpliceImpactResult` objects contain all relevant data along with detailed 
+sequence information for each event. This object allows for maximal 
+interoperability with any level of data from this pipeline.
+
+This vignette uses bundled test data so every core step is runnable.
+
+## Installation
+Install with one of the following methods.
+
+### Option 1: BiocManager
+```{r install-biocmanager, eval=FALSE}
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
+}
+BiocManager::install("SpliceImpactR")
+```
+
+### Option 2: devtools (GitHub)
+```{r install-devtools, eval=FALSE}
+if (!requireNamespace("devtools", quietly = TRUE)) {
+  install.packages("devtools")
+}
+devtools::install_github("fiszbein-lab/SpliceImpactR")
+```
+
+## External tools and acronyms
+- `rMATS` (replicate Multivariate Analysis of Transcript Splicing) provides
+  event-level splicing tables.
+- `HITindex` quantifies first/last exon usage and labels hybrid exons.
+- `PPIDM` Protein-Protein Interaction Domain Miner for domain-domain
+  Interaction derived from PPI and 3did's domain-domain interactions
+- `ELM` Eukaryotic Linear Motif Database for accessing Short Linear Motif
+  occurences and domain-motif interactions
+- `BiomaRt` accesses data from InterPro, PFAM, SignalP, TMHMM, CDD, Mobidb-lite
+
+## Workflow map
+1. Load reference resources (annotations + protein features).
+2. Build sample manifest (`sample_frame`).
+3. (Optional) run the quick-start wrapper for end-to-end execution.
+4. Read splicing events for stepwise analysis.
+5. Run QC summaries and plots.
+6. Run differential inclusion.
+7. Match DI events to transcript/protein sequences and build pairs.
+8. Quantify sequence and domain impacts.
+9. Infer PPI rewiring.
+10. Build enrichment foreground gene sets from table or S4 inputs.
+11. Visualize transcript and protein consequences for one event pair.
+12. Generate integrated multi-layer summaries.
+13. Use S4 container workflows and accessors.
+14. Run optional custom-input entry points.
+
+# Load Reference Resources
+`get_protein_features()` supports these feature sources:
+- `interpro`: integrated domain/family/superfamily signatures.
+- `pfam`: protein domain HMM families.
+- `cdd`: NCBI Conserved Domain Database annotations.
+- `gene3d`: CATH/Gene3D structural domain annotations.
+- `signalp`: signal peptide calls.
+- `tmhmm`: transmembrane helix calls.
+- `ncoils`: coiled-coil region predictions.
+- `seg`: low-complexity segments.
+- `mobidblite`: intrinsically disordered region calls.
+- `elm`: short linear motifs (SLiMs; retrieved from ELM, not BioMart).
+
+For BioMart-backed sources, each feature must provide three attributes:
+`{feature}`, `{feature}_start`, and `{feature}_end` (for example
+`pfam`, `pfam_start`, `pfam_end`). You can add non-BioMart custom features
+with `get_manual_features()` (explained further down in the
+Custom Input Entry Points section) and merge everything through
+`get_comprehensive_annotations()`.
+
+We load test annotations and three representative feature sources
+(`interpro`, `signalp`, `elm`) and combine them. Loading multiple databases in
+one call is possible, but not recommended due to timeouts. These are 
+automatically cached and loaded from cache if the correct signature (organism,
+version, etc) is found. BiomaRt can give difficulties in loading these, so this
+procedure will sometimes take a few tries. If this is unsuccessful, restart R 
+and/or try suggested methods related to this issue (eg: `httr::reset_config()`)
+
+```{r load-resources}
+library(SpliceImpactR)
+annotation_df <- get_annotation(load = "test")
+
+interpro_features <- get_protein_features(
+  biomaRt_databases = c("interpro"),
+  gtf_df = annotation_df$annotations,
+  test = TRUE
+)
+
+signalp_features <- get_protein_features(
+  biomaRt_databases = c("signalp"),
+  gtf_df = annotation_df$annotations,
+  test = TRUE
+)
+
+elm_features <- get_protein_features(
+  biomaRt_databases = c("elm"),
+  gtf_df = annotation_df$annotations,
+  test = TRUE
+)
+
+protein_feature_total <- get_comprehensive_annotations(
+  list(interpro_features, signalp_features, elm_features)
+)
+
+exon_features <- get_exon_features(
+  annotation_df$annotations,
+  protein_feature_total
+)
+```
+
+```{r feature-summary}
+table(protein_feature_total$database)
+```
+
+# Build Sample Manifest
+Each sample directory contains event files exported by `rMATS` and/or
+`HITindex`. The manifest below points to the bundled test directories. Using
+this function, SpliceImpactR will search each directory for the outputs provided
+by rMATS and HIT Index output files ending in `.AFEPSI`, `.ALEPSI`, and `.exon`.
+Label one condition `case` and one condition `control`.
+
+Required sample manifest columns:
+- `path`: per-sample directory containing splicing output files.
+- `sample_name`: unique sample identifier.
+- `condition`: case/control label used in DI and downstream pairing.
+
+Manifest expectations:
+- One row per sample.
+- `path` values must point to readable sample directories.
+- Use exactly two conditions for this standard workflow (`case`, `control`).
+- Include replicate samples per condition for robust differential modeling.
+
+```{r load-data}
+sample_frame <- data.frame(
+  path = c(
+    file.path(system.file("extdata", package = "SpliceImpactR"),
+              "rawData/control_S5/"),
+    file.path(system.file("extdata", package = "SpliceImpactR"),
+              "rawData/control_S6/"),
+    file.path(system.file("extdata", package = "SpliceImpactR"),
+              "rawData/control_S7/"),
+    file.path(system.file("extdata", package = "SpliceImpactR"),
+              "rawData/control_S8/"),
+    file.path(system.file("extdata", package = "SpliceImpactR"),
+              "rawData/case_S1/"),
+    file.path(system.file("extdata", package = "SpliceImpactR"),
+              "rawData/case_S2/"),
+    file.path(system.file("extdata", package = "SpliceImpactR"),
+              "rawData/case_S3/"),
+    file.path(system.file("extdata", package = "SpliceImpactR"),
+              "rawData/case_S4/")
+  ),
+  sample_name = c("S5", "S6", "S7", "S8", "S1", "S2", "S3", "S4"),
+  condition = c(
+    "control", "control", "control", "control",
+    "case", "case", "case", "case"
+  ),
+  stringsAsFactors = FALSE
+)
+```
+
+## Quick start wrapper (`get_splicing_impact`)
+If your inputs already follow the standard layout, run the full workflow with
+the top-level wrapper and choose table or S4 return mode.
+
+```{r wrapper-quickstart, eval=FALSE}
+# data.table-first return
+out_dt <- get_splicing_impact(
+  sample_frame = sample_frame,
+  source_data = "both",
+  annotation_df = annotation_df,
+  protein_feature_total = protein_feature_total,
+  exon_features = exon_features,
+  return_class = "data.table"
+)
+
+# S4-first return (single object carries all slots)
+out_s4 <- get_splicing_impact(
+  sample_frame = sample_frame,
+  source_data = "both",
+  annotation_df = annotation_df,
+  protein_feature_total = protein_feature_total,
+  exon_features = exon_features,
+  return_class = "S4"
+)
+```
+
+# Read Splicing Events
+For the stepwise workflow in this vignette, load event data explicitly:
+
+```{r read-splicing-events}
+data <- get_rmats_hit(
+  sample_frame,
+  event_types = c("ALE", "AFE", "MXE", "SE", "A3SS", "A5SS", "RI")
+)
+
+DT <- data.table::as.data.table(data)
+DT[, .(
+  n_rows = .N,
+  n_events = data.table::uniqueN(event_id),
+  n_genes = data.table::uniqueN(gene_id)
+)]
+```
+
+If `rMATS` and `HITindex` outputs are stored in separate per-sample
+directories, load them independently and combine on shared columns.
+In this test-data example, both manifests point to the same bundled paths;
+in real analyses, `sample_frame_rmats$path` and `sample_frame_hit$path`
+can be different.
+
+```{r load-data-separate}
+sample_frame_rmats <- sample_frame
+sample_frame_hit <- sample_frame
+
+rmats_only <- get_rmats(
+  load_rmats(
+    sample_frame_rmats,
+    use = "JCEC",
+    event_types = c("MXE", "SE", "A3SS", "A5SS", "RI")
+  )
+)
+
+hit_only <- get_hitindex(
+  sample_frame_hit,
+  keep_annotated_first_last = TRUE
+)
+
+shared_cols <- intersect(names(rmats_only), names(hit_only))
+data_separate <- data.table::rbindlist(
+  list(
+    rmats_only[, ..shared_cols],
+    hit_only[, ..shared_cols]
+  ),
+  use.names = TRUE,
+  fill = TRUE
+)
+
+data_separate[, .(
+  n_rows = .N,
+  n_events = data.table::uniqueN(event_id),
+  n_genes = data.table::uniqueN(gene_id)
+)]
+```
+
+# Sample-Level QC and Exploration
+## Compare HITindex Between Conditions
+This summary compares event-level mean HIT values across conditions.
+
+```{r hitindex-compare, fig.cap="HITindex condition comparison."}
+hit_compare <- compare_hit_index(
+  sample_frame,
+  condition_map = c(control = "control", test = "case")
+)
+
+hit_compare$plot
+```
+
+```{r hitindex-table}
+head(hit_compare$results[order(fdr)], 6)
+```
+
+## PSI Distribution Overview
+This panel summarizes event count depth-normalized metrics and PSI eCDF.
+
+```{r overview-psi, fig.cap="Depth-normalized event counts and PSI overview."}
+overview_plot <- overview_spicing_comparison(
+  events = data,
+  sample_df = sample_frame,
+  depth_norm = "exon_files",
+  event_type = "AFE"
+)
+
+overview_plot
+```
+
+# Differential Inclusion (DI)
+We run quasi-binomial GLMs and filter significant events.
+Verbose filtering messages are line-wrapped so progress logs remain readable
+without horizontal scrolling. For efficient processing, set `parallel_glm` to 
+`TRUE` and provide a `BiocParallel` object to `BPPARAM`.
+
+Default thresholds in `keep_sig_pairs` is FDR < 0.05 and |DELTA PSI| > 0.1.
+
+```{r differential-inclusion}
+res <- get_differential_inclusion(
+  data,
+  min_total_reads = 10,
+  parallel_glm = TRUE,
+  BPPARAM = BiocParallel::SerialParam()
+)
+
+res_di <- keep_sig_pairs(res)
+
+res[, .(
+  n_rows = .N,
+  n_sig = sum(padj <= 0.05 & abs(delta_psi) >= 0.1, na.rm = TRUE)
+)]
+```
+
+```{r di-volcano, fig.cap="Differential inclusion volcano plot."}
+plot_di_volcano_dt(res)
+```
+
+# Match Events to Sequences and Build Transcript Pairs
+Significant DI events are mapped to annotation and sequence data, then
+collapsed into case/control transcript pairs.
+This matching is done through a strict hierarchy:
+
+1. Prefilter by `chr`, `strand`, and `gene_id` to keep only compatible
+   annotation intervals.
+2. Match inclusion (`inc`) coordinates to exons and require all inclusion
+   parts to be covered for a transcript candidate.
+3. Remove candidates that overlap exclusion (`exc`) coordinates.
+4. Prioritize transcript/exon choices by event-type-consistent exon class
+   (`first`, `internal`, `last`), then reciprocal overlap and intersection
+   width; protein-linked transcripts are preferred when available.
+5. Build case/control pairs in `get_pairs(source = "multi")` by joining all
+   positive `delta_psi` rows (case) with all negative rows (control) for each
+   `event_id`, then ordering by strongest `|delta_psi|`.
+
+```{r matching-and-pairs}
+matched <- get_matched_events_chunked(
+  res_di,
+  annotation_df$annotations,
+  chunk_size = 2000
+)
+
+hits_sequences <- attach_sequences(matched, annotation_df$sequences)
+pairs <- get_pairs(hits_sequences, source = "multi")
+
+pairs[, .(
+  n_pairs = .N,
+  n_events = data.table::uniqueN(event_id)
+)]
+```
+
+Once pairing is done, we can probe whether there is a proximal/distal shift
+in AFE/ALE usage.
+
+```{r proximal-distal, fig.cap="Proximal versus distal terminal exon summary."}
+proximal_output <- get_proximal_shift_from_hits(pairs)
+proximal_output$plot
+```
+
+# Sequence-Level Consequences
+`compare_sequence_frame()` computes protein-coding class,
+alignment identity, frameshift/rescue status, and length deltas.
+
+Key labels used downstream:
+- `protein_coding`: both isoforms have protein IDs (both sides coding).
+- `onePC`: only one side has a protein ID.
+- `noPC`: neither side has a protein ID.
+- `Match`: protein sequences are identical.
+- `FrameShift`: frame is disrupted between paired isoforms.
+
+```{r sequence-compare}
+seq_compare <- compare_sequence_frame(pairs, annotation_df$annotations)
+```
+
+```{r alignment-summary, fig.cap="Protein alignment summary by event type."}
+alignment_plot <- plot_alignment_summary(seq_compare)
+alignment_plot
+```
+
+```{r length-summary, fig.cap="Case versus control isoform length comparison."}
+length_plot <- plot_length_comparison(seq_compare)
+length_plot
+```
+
+# Domain-Level Changes and Domain Enrichment
+Background transcript pairs are derived from annotations and compared
+against observed event-linked domain changes. 
+
+```{r domain-background-and-hits}
+bg <- get_background(
+  source = "annotated",
+  annotations = annotation_df$annotations,
+  protein_features = protein_feature_total,
+  BPPARAM = BiocParallel::SerialParam()
+)
+
+hits_domain <- get_domains(seq_compare, exon_features)
+
+hits_domain[, .(
+  n_hits = .N,
+  n_domain_changed = sum(diff_n > 0, na.rm = TRUE)
+)]
+```
+
+```{r domain-enrichment, fig.cap="Top enriched InterPro domain differences."}
+enriched_domains <- enrich_domains_hypergeo(
+  hits = hits_domain,
+  background = bg,
+  db_filter = "interpro"
+)
+
+domain_plot <- plot_enriched_domains_counts(enriched_domains, top_n = 20)
+domain_plot
+```
+
+You can also stratify enrichment by event type or by feature database.
+
+```{r domain-enrichment-by-event-db}
+enriched_afe_interpro <- enrich_by_event(
+  hits = hits_domain,
+  background = bg,
+  events = "AFE",
+  db_filter = "interpro"
+)
+
+enriched_interpro_only <- enrich_by_db(
+  hits = hits_domain,
+  background = bg,
+  dbs = "interpro"
+)
+
+list(
+  by_event_rows = nrow(enriched_afe_interpro),
+  by_db_rows = nrow(enriched_interpro_only)
+)
+```
+
+# PPI Rewiring
+PPI effects are inferred from domain and motif changes. Domain-domain
+and domain-motif interactions are sourced from 3did/PPDIM and ELM. PPI rewiring
+currently only works for human inputs.
+
+```{r ppi-effects, fig.cap="Summary of predicted case/control PPI changes."}
+ppi <- get_ppi_interactions()
+
+hits_final <- get_ppi_switches(
+  hits_domain,
+  ppi,
+  protein_feature_total
+)
+
+ppi_plot <- plot_ppi_summary(hits_final)
+ppi_plot
+```
+
+# Gene Enrichment Foreground Probes
+`get_gene_enrichment()` extracts foreground genes for enrichment.
+
+- `mode = "di"` expects a DI-like table (`res`).
+- `mode = "ppi"`/`"domain"` expects a hits-like table (`hits_final` or
+  `hits_domain`).
+- S4 examples are shown in Section 13 so object setup stays in one place.
+
+```{r enrichment-foregrounds}
+fg_di <- get_gene_enrichment(
+  mode = "di",
+  res = res,
+  padj_threshold = 0.1,
+  delta_psi_threshold = 0.1
+)
+
+fg_domain <- get_gene_enrichment(mode = "domain", hits = hits_domain)
+fg_ppi <- get_gene_enrichment(mode = "ppi", hits = hits_final)
+
+lengths(list(di = fg_di, domain = fg_domain, ppi = fg_ppi))
+intersect(fg_di, fg_ppi)
+```
+
+The optional `get_enrichment()` step depends on additional packages and may
+return no significant terms on small toy datasets. If you see all `NA`
+statistics, foreground genes often map too sparsely into the selected
+background and ontology. `p_adjust_cutoff` and `top_n_plot` are set 
+to allow for example visualization, but should be adjusted to standard
+(eg: 0.05, 10) for non-toy data uses.
+
+```{r run-get-enrichment}
+needed <- c("clusterProfiler", "msigdbr", "org.Hs.eg.db")
+has_needed <- all(vapply(
+  needed,
+  requireNamespace,
+  FUN.VALUE = logical(1),
+  quietly = TRUE
+))
+
+if (has_needed) {
+  enrichment_di <- get_enrichment(
+    foreground = fg_domain,
+    background = bg$gene_id,
+    species = "human",
+    gene_id_type = "ensembl",
+    sources = "GO:BP",
+    p_adjust_cutoff = 1, ## CHANGE FOR NON-TOY DATA USAGE, eg: 0.05
+    top_n_plot = 1 ## CHANGE FOR NON-TOY DATA USAGE, eg: NULL or 10
+  )
+
+  enrichment_di$plot
+} else {
+  message(
+    "Skipping get_enrichment(): install ",
+    paste(needed, collapse = ", ")
+  )
+}
+```
+
+# Visualize Transcript and Protein Consequences
+`plot_two_transcripts_with_domains_unified()` shows matched isoforms in either
+transcript (genome-coordinate) or protein (amino-acid) view.
+
+```{r transcript-protein-views, fig.cap="Transcript and protein views for one paired event."}
+viz_pair <- hits_final[
+  !is.na(transcript_id_case) &
+    !is.na(transcript_id_control) &
+    transcript_id_case != "" &
+    transcript_id_control != ""
+][1]
+
+if (nrow(viz_pair) == 0) {
+  stop("No transcript pairs available for visualization.")
+}
+
+tx_pair <- c(viz_pair$transcript_id_case, viz_pair$transcript_id_control)
+
+transcript_centric <- plot_two_transcripts_with_domains_unified(
+  transcripts = tx_pair,
+  gtf_df = annotation_df$annotations,
+  protein_features = protein_feature_total,
+  feature_db = c("interpro"),
+  combine_domains = TRUE,
+  view = "transcript"
+)
+
+protein_centric <- plot_two_transcripts_with_domains_unified(
+  transcripts = tx_pair,
+  gtf_df = annotation_df$annotations,
+  protein_features = protein_feature_total,
+  feature_db = c("interpro"),
+  combine_domains = TRUE,
+  view = "protein"
+)
+
+transcript_centric
+protein_centric
+```
+
+# Inspect a Single Event
+`probe_individual_event()` plots PSI for one event across samples.
+
+```{r probe-event, fig.cap="PSI distribution for one selected event."}
+event_to_probe <- res$event_id[1]
+probe <- probe_individual_event(data, event = event_to_probe)
+probe$plot
+```
+
+```{r probe-table}
+head(probe$data)
+```
+
+# Integrative Visualization
+`integrated_event_summary()` combines sequence, domain, and PPI summaries.
+
+Panel guide:
+- Top-left: event classification composition (`Match`, `FrameShift`, etc.) by
+  event type.
+- Top-right: alignment score distributions by event type.
+- Middle-left: domain-change prevalence (`Any`, case-only, control-only, both).
+- Middle-center/right: fraction and counts of predicted PPI rewiring.
+- Bottom-left: relative event retention from pre-filter DI to final hits.
+- Bottom-right: gene-level event-type coordination (Jaccard heatmap).
+
+```{r integrated-summary, fig.cap="Integrated multi-layer summary.", fig.width=14, fig.height=10}
+int_summary <- integrated_event_summary(hits_final, res)
+int_summary$plot
+```
+
+```{r integrated-summary-table}
+int_summary$summaries$relative_use
+```
+
+# Output Description (`hits_final`, `data`, `res`)
+The pipeline returns three core tables in `data.table` mode:
+- `data`: sample-level event measurements before differential modeling.
+- `res`: differential inclusion results per tested event/site.
+- `hits_final`: paired case/control isoform effects with sequence, domain, and
+  PPI annotations.
+
+Suffix convention used throughout:
+- `_case` = case-preferred isoform values.
+- `_control` = control-preferred isoform values.
+
+## `hits_final` (integrated event-level output)
+Use this table for biological interpretation and downstream plotting.
+
+1. Event and isoform identifiers:
+`event_id`, `event_type`, `gene_id`, `chr`, `strand`,
+`transcript_id_case`, `transcript_id_control`,
+`protein_id_case`, `protein_id_control`, `form_case`, `form_control`,
+`exons_case`, `exons_control`.
+2. Event coordinates and DI statistics:
+`inc_case`, `inc_control`, `exc_case`, `exc_control`,
+`delta_psi_case`, `delta_psi_control`,
+`p.value_case`, `p.value_control`, `padj_case`, `padj_control`,
+`n_samples_case`, `n_samples_control`,
+`n_case_case`, `n_case_control`, `n_control_case`, `n_control_control`.
+3. Sequence and coding context:
+`transcript_seq_case`, `transcript_seq_control`,
+`protein_seq_case`, `protein_seq_control`, `pc_class`,
+length columns (`prot_len_*`, `tx_len_*`, `exon_cds_len_*`, `exon_len_*`)
+and their `*_diff` / `*_diff_abs` derivatives.
+4. Alignment/frame classification:
+DNA alignment (`dna_pid`, `dna_score`, `dna_width`),
+protein alignment (`prot_pid`, `prot_score`, `prot_width`),
+frame diagnostics (`frame_call`, `rescue`, `frame_check_exon1`,
+`frame_check_exon2`), and `summary_classification`.
+5. Domain-level change annotations:
+`domains_exons_case`, `domains_exons_control`,
+`case_only_domains`, `control_only_domains`,
+`case_only_domains_list`, `control_only_domains_list`,
+`either_domains_list`, `case_only_n`, `control_only_n`, `diff_n`.
+6. Predicted interaction rewiring:
+`case_ppi`, `control_ppi`, `n_case_ppi`, `n_control_ppi`, `n_ppi`,
+`case_ppi_drivers`, `control_ppi_drivers`.
+
+## `data` (raw sample-level input table)
+Use `data` to inspect per-sample evidence feeding DI.
+
+Core columns:
+`event_id`, `event_type`, `form`, `gene_id`, `chr`, `strand`, `inc`, `exc`,
+`inclusion_reads`, `exclusion_reads`, `psi`, `sample`, `condition`,
+`source_file`.
+
+Often present depending on import path:
+HITindex metadata such as `HITindex`, `class`, `nFE`, `nLE`, `nUP`, `nDOWN`,
+`nTXPT`, `psi_original`, `total_reads`, `source`.
+
+## `res` (differential inclusion output)
+Use `res` to rank significant events before pairing/domain/PPI steps.
+
+Core columns:
+`site_id`, `event_id`, `event_type`, `gene_id`, `chr`, `strand`, `inc`, `exc`,
+`form`, `n_samples`, `n_control`, `n_case`, `mean_psi_ctrl`, `mean_psi_case`,
+`delta_psi`, `p.value`, `padj`, `cooks_max`, `n`, `n_used`.
+
+# S4 Applications and Accessors
+Use `SpliceImpactResult` when you want all pipeline pieces in one object,
+with consistent filtering across event-linked slots.
+
+`SpliceImpactResult` is a custom S4 container that keeps all major pipeline
+parts synchronized:
+- `raw_events` (`SummarizedExperiment`): sample-level table + ranges/assays.
+- `di_events` / `res_di` (`GRanges`): differential inclusion rows.
+- `matched` (`DFrame`): annotation-matched rows (and sequence-attached rows).
+- `paired_hits` (`GRanges`) + `segments` (`GRangesList`): final case/control
+  event impacts.
+- `sample_frame` (`DFrame`): sample manifest metadata.
+
+```{r s4-init}
+obj <- as_splice_impact_result(
+  data = data,
+  res = res,
+  res_di = res_di,
+  matched = hits_sequences,
+  sample_frame = sample_frame,
+  hits_final = hits_final
+)
+```
+
+`get_hits_*()` wrappers provide compact views for common downstream tasks:
+- `get_hits_core()`: event IDs, transcript/protein IDs, and key DI metadata.
+- `get_hits_domain()`: domain gain/loss columns (`case_only_*`, `control_only_*`,
+  `diff_n`, mapped domain lists).
+- `get_hits_ppi()`: PPI partner changes (`n_ppi`, case/control partner lists,
+  PPI drivers).
+- `get_hits_sequence()`: sequence/alignment/frame fields (`pc_class`,
+  `frame_call`, protein/transcript length deltas, identity metrics).
+
+```{r s4-accessors}
+raw_dt <- as_dt_from_s4(obj, "raw_events")
+di_dt <- as_dt_from_s4(obj, "di_events")
+hits_dt <- as_dt_from_s4(obj, "paired_hits")
+
+hits_core <- get_hits_core(obj)
+hits_domain_view <- get_hits_domain(obj)
+hits_ppi_view <- get_hits_ppi(obj)
+hits_sequence_view <- get_hits_sequence(obj)
+
+c(
+  raw_rows = nrow(raw_dt),
+  di_rows = nrow(di_dt),
+  hits_rows = nrow(hits_dt),
+  hits_core_rows = nrow(hits_core),
+  hits_domain_rows = nrow(hits_domain_view),
+  hits_ppi_rows = nrow(hits_ppi_view),
+  hits_sequence_rows = nrow(hits_sequence_view)
+)
+```
+
+```{r s4-filtering}
+obj_focus <- filter_spliceimpact_hits(
+  obj,
+  diff_n > 0,
+  n_ppi > 0
+)
+
+focus_hits <- as_dt_from_s4(obj_focus, "paired_hits")
+focus_hits[, .N, by = event_type][order(-N)]
+```
+
+```{r s4-enrichment}
+fg_di_s4 <- get_gene_enrichment(
+  mode = "di",
+  x = obj,
+  padj_threshold = 0.05,
+  delta_psi_threshold = 0.1
+)
+
+fg_ppi_s4 <- get_gene_enrichment(mode = "ppi", x = obj)
+
+fg_ppi_focus <- get_gene_enrichment(mode = "ppi", x = obj_focus)
+list(
+  di_equal_table = identical(sort(fg_di), sort(fg_di_s4)),
+  ppi_equal_table = identical(sort(fg_ppi), sort(fg_ppi_s4)),
+  focused_ppi_genes = head(fg_ppi_focus)
+)
+```
+
+```{r s4-schema}
+spliceimpact_s4_schema()
+```
+
+## S4-first Main Workflow (Code Only)
+This mirrors the table workflow, but keeps everything in a single
+`SpliceImpactResult` object.
+
+```{r s4-main-workflow-code-only, eval=FALSE}
+obj_flow <- as_splice_impact_result(
+  data = data,
+  sample_frame = sample_frame
+)
+
+obj_flow <- get_differential_inclusion(
+  obj_flow,
+  min_total_reads = 10,
+  parallel_glm = TRUE,
+  BPPARAM = BiocParallel::SerialParam(),
+  return_class = "S4"
+)
+obj_flow <- keep_sig_pairs(obj_flow, return_class = "S4")
+
+obj_flow <- get_matched_events_chunked(
+  obj_flow,
+  annotation_df$annotations,
+  chunk_size = 2000,
+  return_class = "S4"
+)
+obj_flow <- attach_sequences(
+  obj_flow,
+  annotation_df$sequences,
+  return_class = "S4"
+)
+obj_flow <- get_pairs(obj_flow, source = "multi", return_class = "S4")
+obj_flow <- compare_sequence_frame(
+  obj_flow,
+  annotation_df$annotations,
+  return_class = "S4"
+)
+obj_flow <- get_domains(obj_flow, exon_features, return_class = "S4")
+obj_flow <- get_ppi_switches(
+  obj_flow,
+  ppi,
+  protein_feature_total,
+  return_class = "S4"
+)
+
+hits_core_flow <- get_hits_core(obj_flow)
+hits_domain_flow <- get_hits_domain(obj_flow)
+hits_ppi_flow <- get_hits_ppi(obj_flow)
+hits_sequence_flow <- get_hits_sequence(obj_flow)
+```
+
+# Custom Input Entry Points
+These helpers support non-standard inputs at multiple stages of the workflow.
+
+## Add Manual Protein Features
+`get_manual_features()` lets you add user-defined peptide-level features.
+
+```{r custom-manual-features}
+ann_dt <- data.table::as.data.table(annotation_df$annotations)
+coding_tx <- unique(ann_dt[type == "exon" & cds_has == TRUE, transcript_id])
+n_manual <- min(3L, length(coding_tx))
+
+if (n_manual < 1L) {
+  stop("No coding transcripts found for manual feature example.")
+}
+
+manual_df <- data.frame(
+  ensembl_transcript_id = coding_tx[seq_len(n_manual)],
+  ensembl_peptide_id = rep(NA_character_, n_manual),
+  name = paste0("demo_feature_", seq_len(n_manual)),
+  start = c(20L, 45L, 80L)[seq_len(n_manual)],
+  stop = c(35L, 58L, 92L)[seq_len(n_manual)],
+  database = rep("manual", n_manual),
+  alt_name = rep(NA_character_, n_manual),
+  feature_id = rep(NA_character_, n_manual),
+  stringsAsFactors = FALSE
+)
+
+manual_features <- get_manual_features(
+  manual_features = manual_df,
+  gtf_df = annotation_df$annotations
+)
+
+head(manual_features)
+```
+
+## Pre-DI Custom Table
+Use `get_user_data()` when you already have sample-level reads/PSI.
+
+```{r custom-pre-di}
+example_df <- data.frame(
+  event_id = rep("A3SS:1", 8),
+  event_type = "A3SS",
+  form = rep(c("INC", "EXC"), each = 4),
+  gene_id = "ENSG00000158286",
+  chr = "chrX",
+  strand = "-",
+  inc = c(rep("149608626-149608834", 4), rep("149608626-149608829", 4)),
+  exc = c(rep("", 4), rep("149608830-149608834", 4)),
+  inclusion_reads = c(30, 32, 29, 31, 2, 3, 4, 3),
+  exclusion_reads = c(1, 1, 2, 1, 28, 27, 26, 30),
+  sample = c("S1", "S2", "S3", "S4", "S1", "S2", "S3", "S4"),
+  condition = rep(c("case", "case", "control", "control"), 2),
+  stringsAsFactors = FALSE
+)
+example_df$psi <- example_df$inclusion_reads /
+  (example_df$inclusion_reads + example_df$exclusion_reads)
+
+user_data <- get_user_data(example_df)
+head(user_data)
+```
+
+## Post-DI Custom Table
+Use `get_user_data_post_di()` when you already have event-level DI summaries.
+
+```{r custom-post-di}
+example_user_data <- data.frame(
+  event_id = rep("A3SS:1", 8),
+  event_type = "A3SS",
+  gene_id = "ENSG00000158286",
+  chr = "chrX",
+  strand = "-",
+  form = rep(c("INC", "EXC"), each = 4),
+  inc = c(rep("149608626-149608834", 4), rep("149608626-149608829", 4)),
+  exc = c(rep("", 4), rep("149608830-149608834", 4)),
+  stringsAsFactors = FALSE
+)
+
+user_res <- get_user_data_post_di(example_user_data)
+head(user_res)
+```
+
+## Post-DI rMATS Import
+Use `get_rmats_post_di()` to ingest already-computed rMATS result tables.
+
+```{r custom-rmats-post-di}
+rmats_df <- data.frame(
+  ID = 1L,
+  GeneID = "ENSG00000182871",
+  geneSymbol = "COL18A1",
+  chr = "chr21",
+  strand = "+",
+  longExonStart_0base = 45505834L,
+  longExonEnd = 45505966L,
+  shortES = 45505837L,
+  shortEE = 45505966L,
+  flankingES = 45505357L,
+  flankingEE = 45505431L,
+  ID.2 = 2L,
+  IJC_SAMPLE_1 = "1,1,1",
+  SJC_SAMPLE_1 = "1,1,1",
+  IJC_SAMPLE_2 = "1,1,1",
+  SJC_SAMPLE_2 = "1,1,1",
+  IncFormLen = 52L,
+  SkipFormLen = 49L,
+  PValue = 0.6967562,
+  FDR = 1,
+  IncLevel1 = "0.0,0.0,0.0",
+  IncLevel2 = "1.0,1.0,1.0",
+  IncLevelDifference = 1.0,
+  stringsAsFactors = FALSE
+)
+
+user_res_rmats <- get_rmats_post_di(rmats_df, event_type = "A3SS")
+head(user_res_rmats)
+```
+
+## Transcript-Pair Entry Point
+Use `compare_transcript_pairs()` when you want to start directly from chosen
+transcript pairs instead of event matching.
+
+```{r custom-transcript-pairs}
+tx_ids <- unique(annotation_df$annotations$transcript_id)
+tx_ids <- tx_ids[!is.na(tx_ids) & tx_ids != ""]
+
+if (length(tx_ids) < 4L) {
+  stop("Need at least four transcripts for transcript-pair example.")
+}
+
+transcript_pairs <- data.frame(
+  transcript1 = tx_ids[1:2],
+  transcript2 = tx_ids[3:4],
+  stringsAsFactors = FALSE
+)
+
+user_matched <- compare_transcript_pairs(
+  transcript_pairs = transcript_pairs,
+  annotations = annotation_df$annotations
+)
+
+head(user_matched)
+```
+
+# Session Info
+```{r}
+sessionInfo()
+```

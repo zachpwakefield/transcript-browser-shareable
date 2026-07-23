@@ -1,0 +1,4 @@
+package	version
+data.table	1.18.2.1
+jsonlite	2.0.0
+

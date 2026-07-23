@@ -1,0 +1,27 @@
+.DS_Store
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.wrangler/
+frontend/.vinext/
+desktop_app/dist/
+
+# Scientific inputs and generated local builds are intentionally not checked in.
+/data/cache/
+/data/reference/
+/data/spliceimpactr-cache/
+/data/builds/*
+!/data/builds/README.md
+/output/
+/tmp/
+
+# Local R/IDE state.
+.Rhistory
+.Rproj.user/
+*.Rproj
